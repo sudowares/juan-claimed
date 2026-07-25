@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, ClipboardList, Lightbulb, Loader2, MapPin, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getBenefitById } from "@/services/benefits.service";
 import { getMyBenefitEligibility, getGuestBenefitEligibility, type BenefitEligibilityDetail } from "@/services/eligibility.service";
