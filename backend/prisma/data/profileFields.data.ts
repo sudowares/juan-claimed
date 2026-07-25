@@ -169,7 +169,7 @@ export const profileFields: ProfileFieldDef[] = [
     englishDescription: "Street name and house number",
     tagalogDescription: "Pangalan ng kalsada at numero ng bahay",
     inputType: "TEXT",
-    required: true,
+    required: false,
     sortOrder: 12,
     configJson: null,
     notConditional: true,

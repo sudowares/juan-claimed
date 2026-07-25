@@ -2,6 +2,7 @@ import { prisma, type DbClient } from "../utils/prisma.js";
 import dayjs from "../utils/dayjs.util.js";
 import { assertAnswerMatchesFieldConfig } from "../utils/condition.util.js";
 import { isPsgcCode, derivePsgcAncestorPath } from "../utils/psgc.util.js";
+import { fetchFieldOptions } from "./fieldOptions.service.js";
 
 // field_value is a single VarChar(255); compound shapes are JSON-encoded into it on
 // write and parsed back out on read/evaluation. See docs/condition-value-shapes.md for
@@ -17,6 +18,7 @@ const PH_LOCATION_HIERARCHY_KEY = "PH_LOCATION";
 
 export type AnswerableField = {
   id: string;
+  englishName: string;
   parentFieldId: string | null;
   fieldHierarchyId: string | null;
   configJson: unknown;
@@ -30,10 +32,18 @@ export interface SubmitFieldAnswerInput {
   repeaterGroupId?: string | null | undefined;
 }
 
-const assertLength = (encoded: string, fieldId: string): string => {
+// Carries which field actually failed onto the thrown error (message stays the exact
+// "INVALID_ANSWER_VALUE" string fieldAnswer.controller.ts matches on) so the API response —
+// and Vercel's function logs — say which field broke instead of leaving that a guessing game.
+const invalidAnswer = (field: { id: string; englishName: string }): never => {
+  console.error(`[FieldAnswerService] Invalid answer value for field "${field.englishName}" (${field.id}).`);
+  throw Object.assign(new Error("INVALID_ANSWER_VALUE"), { fieldLabel: field.englishName });
+};
+
+const assertLength = (encoded: string, field: { id: string; englishName: string }): string => {
   if (encoded.length > MAX_VALUE_LENGTH) {
-    console.error(`[FieldAnswerService] Encoded value for field "${fieldId}" exceeds ${MAX_VALUE_LENGTH} characters.`);
-    throw new Error("INVALID_ANSWER_VALUE");
+    console.error(`[FieldAnswerService] Encoded value for field "${field.englishName}" (${field.id}) exceeds ${MAX_VALUE_LENGTH} characters.`);
+    return invalidAnswer(field);
   }
   return encoded;
 };
@@ -63,53 +73,57 @@ const encodeFieldValue = async (db: DbClient, field: AnswerableField, rawValue: 
 
   switch (inputType) {
     case "TEXT": {
-      if (typeof rawValue !== "string") throw new Error("INVALID_ANSWER_VALUE");
+      if (typeof rawValue !== "string") return invalidAnswer(field);
       assertAnswerMatchesFieldConfig(inputType, configJson, rawValue);
-      return assertLength(rawValue, field.id);
+      return assertLength(rawValue, field);
     }
     case "NUMBER":
     case "MONEY": {
-      if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) throw new Error("INVALID_ANSWER_VALUE");
+      if (typeof rawValue !== "number" || !Number.isFinite(rawValue)) return invalidAnswer(field);
       assertAnswerMatchesFieldConfig(inputType, configJson, rawValue);
-      return assertLength(String(rawValue), field.id);
+      return assertLength(String(rawValue), field);
     }
     case "BOOLEAN": {
-      if (typeof rawValue !== "boolean") throw new Error("INVALID_ANSWER_VALUE");
+      if (typeof rawValue !== "boolean") return invalidAnswer(field);
       return rawValue ? "true" : "false";
     }
     case "DATE": {
-      if (typeof rawValue !== "string" || !dayjs(rawValue).isValid()) throw new Error("INVALID_ANSWER_VALUE");
+      if (typeof rawValue !== "string" || !dayjs(rawValue).isValid()) return invalidAnswer(field);
       assertAnswerMatchesFieldConfig(inputType, configJson, rawValue);
-      return assertLength(rawValue, field.id);
+      return assertLength(rawValue, field);
     }
     case "DURATION": {
-      if (!isDurationShape(rawValue)) throw new Error("INVALID_ANSWER_VALUE");
+      if (!isDurationShape(rawValue)) return invalidAnswer(field);
       assertAnswerMatchesFieldConfig(inputType, configJson, rawValue);
-      return assertLength(JSON.stringify(rawValue), field.id);
+      return assertLength(JSON.stringify(rawValue), field);
     }
     case "SINGLE_SELECT": {
-      if (typeof rawValue !== "string") throw new Error("INVALID_ANSWER_VALUE");
-      const option = await db.dimFieldOption.findFirst({ where: { fieldId: field.id, value: rawValue } });
-      if (!option) throw new Error("INVALID_ANSWER_VALUE");
-      return assertLength(rawValue, field.id);
+      if (typeof rawValue !== "string") return invalidAnswer(field);
+      // Most SINGLE_SELECT fields have real DimFieldOption rows, but Nationality/Country/
+      // School are synthesized on the fly from DimCountries/DimSchool instead (see
+      // fieldOptions.service.ts's fetchFieldOptions) — a plain dimFieldOption lookup can
+      // never see those, so every submission for those three fields failed unconditionally.
+      const options = await fetchFieldOptions(field.id);
+      if (!options.some((option) => option.value === rawValue)) return invalidAnswer(field);
+      return assertLength(rawValue, field);
     }
     case "MULTI_SELECT": {
-      if (!Array.isArray(rawValue) || rawValue.some((v) => typeof v !== "string")) throw new Error("INVALID_ANSWER_VALUE");
+      if (!Array.isArray(rawValue) || rawValue.some((v) => typeof v !== "string")) return invalidAnswer(field);
       const values = rawValue as string[];
       const options = await db.dimFieldOption.findMany({ where: { fieldId: field.id, value: { in: values } } });
-      if (options.length !== new Set(values).size) throw new Error("INVALID_ANSWER_VALUE");
+      if (options.length !== new Set(values).size) return invalidAnswer(field);
       assertAnswerMatchesFieldConfig(inputType, configJson, values);
-      return assertLength(JSON.stringify(values), field.id);
+      return assertLength(JSON.stringify(values), field);
     }
     case "HIERARCHY_SELECT": {
-      if (typeof rawValue !== "string" || !field.fieldHierarchyId) throw new Error("INVALID_ANSWER_VALUE");
+      if (typeof rawValue !== "string" || !field.fieldHierarchyId) return invalidAnswer(field);
       if (field.hierarchy?.key === PH_LOCATION_HIERARCHY_KEY) {
-        if (!isPsgcCode(rawValue)) throw new Error("INVALID_ANSWER_VALUE");
-        return assertLength(rawValue, field.id);
+        if (!isPsgcCode(rawValue)) return invalidAnswer(field);
+        return assertLength(rawValue, field);
       }
       const node = await db.dimFieldHierarchyNode.findFirst({ where: { fieldHierarchyId: field.fieldHierarchyId, value: rawValue } });
-      if (!node) throw new Error("INVALID_ANSWER_VALUE");
-      return assertLength(rawValue, field.id);
+      if (!node) return invalidAnswer(field);
+      return assertLength(rawValue, field);
     }
     case "REPEATER_GROUP":
       console.error(`[FieldAnswerService] Field "${field.id}" is a REPEATER_GROUP and has no scalar answer of its own.`);

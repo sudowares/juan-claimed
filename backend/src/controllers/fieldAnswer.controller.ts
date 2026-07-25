@@ -38,7 +38,10 @@ const mapFieldAnswerError = (res: Response, error: any, message: string) => {
   }
 
   if (error.message === "INVALID_ANSWER_VALUE") {
-    return res.status(400).json({ success: false, message, error: "The submitted value does not match this field's expected shape.", errorCode: error.message, data: null });
+    const detail = error.fieldLabel
+      ? `The submitted value for "${error.fieldLabel}" does not match its expected shape.`
+      : "The submitted value does not match this field's expected shape.";
+    return res.status(400).json({ success: false, message, error: detail, errorCode: error.message, data: null });
   }
 
   if (error.message === "ANSWER_VIOLATES_FIELD_CONFIG") {
