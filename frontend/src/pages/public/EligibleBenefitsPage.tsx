@@ -70,8 +70,14 @@ export function EligibleBenefitsPage() {
               Your Benefits
             </span>
             <h1 className="mt-4 font-display text-3xl leading-[1.05] font-black tracking-tight text-slate-900 md:text-4xl lg:text-5xl">
-              {isLoading ? "Finding your benefits" : `${matched.length} benefit${matched.length === 1 ? "" : "s"}`}{" "}
-              <span className="text-[color:var(--color-ph-blue)]">found for you</span>
+              {isLoading ? (
+                "Finding your benefits…"
+              ) : (
+                <>
+                  {matched.length} benefit{matched.length === 1 ? "" : "s"}{" "}
+                  <span className="text-[color:var(--color-ph-blue)]">found for you</span>
+                </>
+              )}
             </h1>
             <p className="mx-auto mt-3 max-w-xl text-sm text-slate-600 md:text-base">
               Based on your current answers, here's what you may already qualify for.
