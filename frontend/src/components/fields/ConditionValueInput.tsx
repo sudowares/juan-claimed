@@ -84,6 +84,26 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
     };
   }, [field.id, inputType, token]);
 
+  // IS_EMPTY/IS_NOT_EMPTY need no target value at all, regardless of inputType — previously
+  // only checked for HIERARCHY_SELECT below, so every other type (TEXT, DATE, NUMBER, ...)
+  // still rendered a value input nobody could ever fill in meaningfully for these operators.
+  if (op === "IS_EMPTY" || op === "IS_NOT_EMPTY") return null;
+
+  // DURATION's own BETWEEN needs a unit alongside min/max — same shape as AGE_BETWEEN below
+  // (backend's toDurationRangeDays requires {min, max, unit}) — checked before the generic
+  // BETWEEN branch (NUMBER/MONEY only) so it doesn't fall through and lose the unit.
+  if (op === "BETWEEN" && inputType === "DURATION") {
+    const v = (value as { min?: number; max?: number; unit?: string }) ?? {};
+    return (
+      <div className="flex items-center gap-2">
+        <Input type="number" placeholder="Min" value={v.min ?? ""} onChange={(e) => onChange({ ...v, min: Number(e.target.value), unit: v.unit ?? "months" })} className="w-20" />
+        <span className="text-xs text-muted-foreground">to</span>
+        <Input type="number" placeholder="Max" value={v.max ?? ""} onChange={(e) => onChange({ ...v, max: Number(e.target.value), unit: v.unit ?? "months" })} className="w-20" />
+        <SearchableSelect value={v.unit ?? "months"} onChange={(u) => onChange({ ...v, unit: u })} options={DURATION_UNIT_OPTIONS} triggerClassName="w-28" />
+      </div>
+    );
+  }
+
   if (op === "BETWEEN") {
     const v = (value as { min?: number; max?: number }) ?? {};
     return (
@@ -178,11 +198,6 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
     const levelLabels = isPhLocation
       ? PSGC_LEVEL_LABELS
       : [...(hierarchy?.fieldHierarchyLevels ?? [])].sort((a, b) => a.level - b.level).map((l) => l.englishName);
-
-    // IS_EMPTY/IS_NOT_EMPTY need no target value at all.
-    if (op === "IS_EMPTY" || op === "IS_NOT_EMPTY") {
-      return null;
-    }
 
     // BELONGS_TO/NOT_BELONGS_TO: the multi-level, multi-select "combine every selected
     // parent's children" picker (see HierarchyMultiLevelSelector) — e.g. "is within: A > B >

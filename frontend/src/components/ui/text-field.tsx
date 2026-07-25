@@ -303,7 +303,11 @@ export function DurationField({
     <FloatingLabelField
       label={label}
       sublabel={sublabel}
-      hasValue={value?.value !== undefined}
+      // Always floated, same reasoning as TextField's ALWAYS_FLOATED_TYPES (date/time
+      // inputs) — a composite number+unit pair has no single "empty" visual state a
+      // centered placeholder-style label can sit inside without overlapping one of the two
+      // controls, so it always sits at the top caption position instead, same as a filled field.
+      hasValue={true}
       required={required}
       disabled={disabled}
       error={error}
@@ -311,7 +315,7 @@ export function DurationField({
       badge={badge}
       className={containerClassName}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 rounded-md border border-input bg-background px-2 py-1">
         <Input
           type="number"
           min={0}
@@ -321,8 +325,9 @@ export function DurationField({
             const raw = e.target.value === "" ? 0 : Number(e.target.value);
             onChange({ value: Math.max(0, raw), unit });
           }}
-          className="h-auto w-16 rounded-none border-0 p-0 shadow-none focus-visible:ring-0"
+          className="h-7 w-14 rounded-none border-0 p-0 shadow-none focus-visible:ring-0"
         />
+        <div className="h-5 w-px shrink-0 bg-border" />
         <SearchableSelect
           variant="bare"
           value={unit}

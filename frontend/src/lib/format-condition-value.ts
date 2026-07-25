@@ -64,6 +64,11 @@ export function formatConditionValue(
     return { en: `${v.min ?? "?"}–${v.max ?? "?"} ${v.unit ?? ""}`, tl: `${v.min ?? "?"}–${v.max ?? "?"} ${v.unit ?? ""}` };
   }
 
+  if (op === "BETWEEN" && inputType === "DURATION") {
+    const v = value as { min?: number; max?: number; unit?: string };
+    return { en: `${v.min ?? "?"}–${v.max ?? "?"} ${v.unit ?? ""}`, tl: `${v.min ?? "?"}–${v.max ?? "?"} ${v.unit ?? ""}` };
+  }
+
   if (inputType === "DURATION") {
     const v = value as { value?: number; unit?: string };
     return { en: `${v.value ?? "?"} ${v.unit ?? ""}`, tl: `${v.value ?? "?"} ${v.unit ?? ""}` };
