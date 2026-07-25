@@ -279,23 +279,33 @@ const submitOneFieldAnswer = async (db: DbClient, userId: string, input: SubmitF
   }
 };
 
-// SUBMIT FIELD ANSWERS (bulk upsert) — "With" variant processes items SEQUENTIALLY (not
-// Promise.all): each item does its own find-then-create-or-update, so running them
-// concurrently could race and create duplicate rows for the same (user, field).
+// SUBMIT FIELD ANSWERS (bulk upsert). Runs items CONCURRENTLY (Promise.all) — each item is
+// its own find-then-create-or-update, which would race for two items sharing the same
+// (user, fieldId, repeaterGroupId) (both could find "no existing row" before either commits
+// its create), so duplicates are stripped first (last one in `items` wins, matching a plain
+// object/map's own overwrite semantics) to make concurrent execution safe. A legitimate
+// client submission never has duplicates in the first place (renderableFields().map() over
+// distinct fields) — this only guards a malformed/replayed request.
 export const submitFieldAnswersWith = async (db: DbClient, userId: string, items: SubmitFieldAnswerInput[]): Promise<void> => {
+  const deduped = new Map<string, SubmitFieldAnswerInput>();
   for (const item of items) {
-    await submitOneFieldAnswer(db, userId, item);
+    deduped.set(`${item.fieldId}:${item.repeaterGroupId ?? ""}`, item);
   }
+  await Promise.all([...deduped.values()].map((item) => submitOneFieldAnswer(db, userId, item)));
 };
 
 export const submitFieldAnswers = async (userId: string, items: SubmitFieldAnswerInput[]) => {
-  // Each item is its own sequential find-then-create-or-update round trip (see
-  // submitFieldAnswersWith's comment on why it can't run concurrently), and a full quiz
-  // submission can be 20+ items — against a serverless-friendly but higher-latency host like
-  // Neon (vs. local Postgres), Prisma's default 5000ms interactive-transaction timeout isn't
-  // enough headroom, especially on a cold start. Bumped well above what a real submission
-  // should ever need.
-  await prisma.$transaction((tx) => submitFieldAnswersWith(tx, userId, items), { timeout: 20000, maxWait: 10000 });
+  // Previously wrapped in one prisma.$transaction() around the whole (sequential) batch —
+  // a full quiz submission is 20+ items, each its own multi-round-trip find-then-upsert, and
+  // against a higher-latency serverless-to-Neon connection that blew through even a bumped
+  // 20000ms interactive-transaction timeout (P2028) on a cold start. Dropped the wrapping
+  // transaction entirely: each item's own create/update is already atomic on its own
+  // (a single Postgres statement), we just lose "every field saves together or none do"
+  // across the whole batch — an acceptable trade for a profile/quiz form, where a stuck,
+  // fully-failed submission is worse UX than one field occasionally needing a resubmit.
+  // Combined with submitFieldAnswersWith's now-concurrent writes above, wall-clock time is
+  // roughly the slowest single item instead of the sum of all of them.
+  await submitFieldAnswersWith(prisma, userId, items);
   return await fetchUserFieldAnswers(userId);
 };
 
