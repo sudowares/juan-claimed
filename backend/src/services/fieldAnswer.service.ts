@@ -275,7 +275,13 @@ export const submitFieldAnswersWith = async (db: DbClient, userId: string, items
 };
 
 export const submitFieldAnswers = async (userId: string, items: SubmitFieldAnswerInput[]) => {
-  await prisma.$transaction((tx) => submitFieldAnswersWith(tx, userId, items));
+  // Each item is its own sequential find-then-create-or-update round trip (see
+  // submitFieldAnswersWith's comment on why it can't run concurrently), and a full quiz
+  // submission can be 20+ items — against a serverless-friendly but higher-latency host like
+  // Neon (vs. local Postgres), Prisma's default 5000ms interactive-transaction timeout isn't
+  // enough headroom, especially on a cold start. Bumped well above what a real submission
+  // should ever need.
+  await prisma.$transaction((tx) => submitFieldAnswersWith(tx, userId, items), { timeout: 20000, maxWait: 10000 });
   return await fetchUserFieldAnswers(userId);
 };
 
