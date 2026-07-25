@@ -2,6 +2,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useAlert } from "@/lib/alert-store";
 import { getFields } from "@/services/fields.service";
 import { useAnswers } from "@/lib/answers-store";
 import { renderableFields } from "@/lib/field-visibility";
@@ -19,6 +20,7 @@ import type { DimField } from "@/types/domain";
 export function FormPage() {
   const navigate = useNavigate();
   const { token, role, user } = useAuth();
+  const { showApiError } = useAlert();
   const { answersMap, isGuest, submit } = useAnswers();
   const [globalFields, setGlobalFields] = React.useState<DimField[] | null>(null);
   const [draft, setDraft] = React.useState<Record<string, unknown>>({});
@@ -55,9 +57,14 @@ export function FormPage() {
     const answerable = renderableFields(globalFields, draft).filter(
       (f) => !isEgovFieldLocked(f, role, user) && f.fieldInputType.value !== "REPEATER_GROUP",
     );
-    await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
-    setSubmitting(false);
-    navigate("/my-benefits");
+    try {
+      await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
+      navigate("/my-benefits");
+    } catch (err) {
+      showApiError(err, "Could not save your answers. Please check the form and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

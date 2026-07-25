@@ -2,6 +2,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useAlert } from "@/lib/alert-store";
 import { getFields } from "@/services/fields.service";
 import { useAnswers } from "@/lib/answers-store";
 import { getEligibilityResults } from "@/services/benefits.service";
@@ -19,6 +20,7 @@ import { ClayCard } from "@/components/apply/ClayCard";
 export function AnswerMorePage() {
   const navigate = useNavigate();
   const { token, role, user } = useAuth();
+  const { showApiError } = useAlert();
   const { answers, answersMap, repeaterRowsMap, isGuest, submit } = useAnswers();
   const [pendingFields, setPendingFields] = React.useState<DimField[] | null>(null);
   const [pendingBenefitNames, setPendingBenefitNames] = React.useState<string[]>([]);
@@ -70,9 +72,14 @@ export function AnswerMorePage() {
     const answerable = renderableFields(pendingFields, draft).filter(
       (f) => !isEgovFieldLocked(f, role, user) && f.fieldInputType.value !== "REPEATER_GROUP",
     );
-    await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
-    setSubmitting(false);
-    navigate("/my-benefits");
+    try {
+      await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
+      navigate("/my-benefits");
+    } catch (err) {
+      showApiError(err, "Could not save your answers. Please check the form and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

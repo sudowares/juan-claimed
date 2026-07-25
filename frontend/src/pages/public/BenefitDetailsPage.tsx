@@ -2,6 +2,7 @@ import * as React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Loader2, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useAlert } from "@/lib/alert-store";
 import { getBenefitById } from "@/services/benefits.service";
 import { getMyBenefitEligibility, getGuestBenefitEligibility, type BenefitEligibilityDetail } from "@/services/eligibility.service";
 import { getFields, getFieldConditionOperators } from "@/services/fields.service";
@@ -37,6 +38,7 @@ export function BenefitDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { token, role, user } = useAuth();
+  const { showApiError } = useAlert();
   const { answersMap, repeaterRowsMap, submit } = useAnswers();
   const [benefit, setBenefit] = React.useState<FctBenefit | null | undefined>(undefined);
   const [eligibility, setEligibility] = React.useState<BenefitEligibilityDetail | null>(null);
@@ -100,9 +102,14 @@ export function BenefitDetailsPage() {
     const answerable = renderableFields(pendingFields, draft).filter(
       (f) => !isEgovFieldLocked(f, role, user) && f.fieldInputType.value !== "REPEATER_GROUP",
     );
-    await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
-    setSubmitting(false);
-    reloadEligibility();
+    try {
+      await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
+      reloadEligibility();
+    } catch (err) {
+      showApiError(err, "Could not save your answers. Please check the form and try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (benefit === undefined) {

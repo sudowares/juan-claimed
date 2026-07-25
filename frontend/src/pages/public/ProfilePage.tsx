@@ -2,6 +2,7 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, UserRound, Pencil, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useAlert } from "@/lib/alert-store";
 import { useAnswers } from "@/lib/answers-store";
 import { getFields } from "@/services/fields.service";
 import { getFieldOptions } from "@/services/fieldOptions.service";
@@ -28,6 +29,7 @@ import type { DimField } from "@/types/domain";
 export function ProfilePage() {
   const navigate = useNavigate();
   const { user, token, role, egovProfile } = useAuth();
+  const { showApiError } = useAlert();
   const { answersMap, submit, loading } = useAnswers();
   const [fields, setFields] = React.useState<DimField[] | null>(null);
   const [editing, setEditing] = React.useState(false);
@@ -98,9 +100,14 @@ export function ProfilePage() {
     const answerable = renderableFields(profileFields, draft).filter(
       (f) => !isEgovFieldLocked(f, role, user) && f.fieldInputType.value !== "REPEATER_GROUP",
     );
-    await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
-    setSaving(false);
-    setEditing(false);
+    try {
+      await submit(answerable.map((f) => ({ fieldId: f.id, value: draft[f.id] ?? null })));
+      setEditing(false);
+    } catch (err) {
+      showApiError(err, "Could not save your answers. Please check the form and try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
