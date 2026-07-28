@@ -7,7 +7,11 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: app
     ports:
-      - "5432:5432"
+      # Bound to localhost ONLY. Publishing Postgres on 0.0.0.0 with the weak dev password
+      # (postgres/postgres) is how a public host gets its DB wiped by ransomware scanners —
+      # that already happened once. Localhost keeps psql/Studio access for the dev machine
+      # without exposing the port to the internet. NEVER change this to "5432:5432".
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,7 +25,8 @@ services:
     restart: unless-stopped
     ports:
       - "4000:4000"
-      - "5555:5555"
+      # Prisma Studio — full unauthenticated read/write DB GUI. Localhost only, never public.
+      - "127.0.0.1:5555:5555"
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/app?schema=public
       BACKEND_PORT: 4000
