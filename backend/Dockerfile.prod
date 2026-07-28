@@ -1,0 +1,25 @@
+# Production image for the backend. Unlike ./Dockerfile (dev), everything is baked into the
+# image at BUILD time — no source bind mount, no `tsx watch`, no generate-at-startup race.
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Deps first so this layer caches unless package.json changes.
+COPY package*.json ./
+RUN npm install
+
+# App source.
+COPY . .
+
+# Generate the Prisma client INTO the image (writes src/generated/prisma). This is the step
+# your dev container did at startup — doing it at build time means the client is always
+# present, for the server AND any one-off `exec` (seed, scripts).
+RUN npx prisma generate
+
+# Compile TS -> dist/ (tsc, outDir=dist). dist/generated/prisma comes along for the ride.
+RUN npm run build
+
+EXPOSE 4000
+
+# Apply migrations, then run the compiled server (no tsx, no watch).
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]

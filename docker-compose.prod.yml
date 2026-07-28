@@ -1,0 +1,85 @@
+# Production stack for the VPS.
+#   Run:  docker compose -f docker-compose.prod.yml up -d --build
+# Differences from the dev docker-compose.yml:
+#   - builds the *.prod Dockerfiles (client baked in, real build, no tsx/vite watch)
+#   - NO source bind mounts (image is the source of truth)
+#   - Postgres + Prisma Studio are NOT exposed to the internet
+#   - no CHOKIDAR polling, no demo-persona seeding
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: app
+    # Bound to localhost only — the DB is reachable by the backend over the compose network
+    # (host "postgres"), never from the public internet. Drop this block entirely if you
+    # don't need host-side psql access.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    # Bound to localhost — the host nginx (reverse proxy + TLS) is the only thing that
+    # reaches it. Never public. NO 5555 (Prisma Studio) either.
+    ports:
+      - "127.0.0.1:4000:4000"
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/app?schema=public
+      BACKEND_PORT: 4000
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      JWT_SECRET: ${JWT_SECRET}
+      EGOV_BASE_URL: ${EGOV_BASE_URL}
+      EGOV_PARTNER_CODE: ${EGOV_PARTNER_CODE}
+      EGOV_PARTNER_SECRET: ${EGOV_PARTNER_SECRET}
+      EGOV_EVERIFY_CLIENT_ID: ${EGOV_EVERIFY_CLIENT_ID}
+      EGOV_EVERIFY_CLIENT_SECRET: ${EGOV_EVERIFY_CLIENT_SECRET}
+      EGOV_EVERIFY_PUBKEY: ${EGOV_EVERIFY_PUBKEY}
+      EGOV_EMESSAGE_ACCESS_TOKEN: ${EGOV_EMESSAGE_ACCESS_TOKEN}
+      EGOV_MESSAGE_BASE_URL: ${EGOV_MESSAGE_BASE_URL}
+      EGOV_AI_ACCESS_CODE: ${EGOV_AI_ACCESS_CODE}
+      EGOV_AI_CORE_BASE_URL: ${EGOV_AI_CORE_BASE_URL}
+      EGOV_PAY_API_KEY: ${EGOV_PAY_API_KEY}
+      EGOV_PAY_SETTLEMENT_TEMPLATE_UUID: ${EGOV_PAY_SETTLEMENT_TEMPLATE_UUID}
+      EGOV_REPORT_ACCESS_TOKEN: ${EGOV_REPORT_ACCESS_TOKEN}
+      EGOV_FACE_LIVENESS_API_KEY: ${EGOV_FACE_LIVENESS_API_KEY}
+      EGOV_COMPASS_API_KEY: ${EGOV_COMPASS_API_KEY}
+      BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      # Vite bakes these into the static bundle at BUILD time — they are build args, not
+      # runtime env. Rebuild the image if you change them.
+      args:
+        # Empty = same-origin. The frontend's own paths already carry the /api prefix
+        # (e.g. apiFetch("/api/scopes")), so the base must be just the origin. Host nginx
+        # routes /api/* to the backend, so the browser calls https://<domain>/api/... — no
+        # CORS, no hardcoded IP.
+        VITE_API_BASE_URL: ""
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+    restart: unless-stopped
+    # Bound to localhost — host nginx proxies to this. Container nginx serves the static
+    # dist on port 80 inside the container; host side uses 8083 (free on this VPS).
+    ports:
+      - "127.0.0.1:8083:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
