@@ -97,6 +97,15 @@ export function getCitiesMunicipalitiesByDistrict(districtCode: string): Promise
   return psgcFetch<PsgcCityMunicipality[]>(`/districts/${districtCode}/cities-municipalities/`);
 }
 
+// Cities/municipalities directly under a region, skipping the province/district tier. Some
+// regions (NCR most notably) have no provinces at all — `/regions/{code}/provinces/` returns
+// [] — so the cascading picker has nothing to put in its subdivision column and would dead-end.
+// This endpoint lets it jump straight from region to city in that case. See
+// PsgcPhLocationHierarchyField's no-subdivision shortcut.
+export function getCitiesMunicipalitiesByRegion(regionCode: string): Promise<PsgcCityMunicipality[]> {
+  return psgcFetch<PsgcCityMunicipality[]>(`/regions/${regionCode}/cities-municipalities/`);
+}
+
 export function getBarangays(cityOrMunicipalityCode: string): Promise<PsgcBarangay[]> {
   return psgcFetch<PsgcBarangay[]>(`/cities-municipalities/${cityOrMunicipalityCode}/barangays/`);
 }

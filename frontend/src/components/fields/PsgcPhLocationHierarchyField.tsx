@@ -6,6 +6,7 @@ import {
   getRegions,
   getSubdivisions,
   getCitiesMunicipalities,
+  getCitiesMunicipalitiesByRegion,
   getBarangays,
   resolvePsgcAddressValue,
   type PsgcAdminMode,
@@ -137,6 +138,14 @@ export function PsgcPhLocationHierarchyField({
   const [cities, setCities] = React.useState<PsgcCityMunicipality[]>([]);
   const [barangays, setBarangays] = React.useState<PsgcBarangay[]>([]);
 
+  // True once the subdivision list for the current region has finished loading AND came back
+  // empty — i.e. this region has no provinces/districts at all (NCR). In that case the picker
+  // hides the subdivision column and jumps region -> city/municipality directly, loading cities
+  // from the region endpoint instead of a subdivision. Reset to false on every region/mode
+  // change so an in-flight region doesn't briefly read as "no subdivisions".
+  const [subdivisionsLoaded, setSubdivisionsLoaded] = React.useState(false);
+  const noSubdivisions = subdivisionsLoaded && subdivisions.length === 0;
+
   const [loading, setLoading] = React.useState({ regions: false, subdivisions: false, cities: false, barangays: false });
 
   useCancelableEffect((isCancelled) => {
@@ -148,6 +157,7 @@ export function PsgcPhLocationHierarchyField({
 
   useCancelableEffect(
     (isCancelled) => {
+      setSubdivisionsLoaded(false);
       if (!regionCode) {
         setSubdivisions([]);
         return;
@@ -155,23 +165,34 @@ export function PsgcPhLocationHierarchyField({
       setLoading((l) => ({ ...l, subdivisions: true }));
       getSubdivisions(mode, regionCode)
         .then((data) => !isCancelled() && setSubdivisions(data))
-        .finally(() => !isCancelled() && setLoading((l) => ({ ...l, subdivisions: false })));
+        .finally(() => {
+          if (isCancelled()) return;
+          setLoading((l) => ({ ...l, subdivisions: false }));
+          setSubdivisionsLoaded(true);
+        });
     },
     [regionCode, mode],
   );
 
   useCancelableEffect(
     (isCancelled) => {
-      if (!subdivisionCode) {
+      // Normal path: cities under the chosen subdivision. Shortcut path: region has no
+      // subdivisions at all (NCR), so load its cities directly and skip the subdivision level.
+      const fetchCities = subdivisionCode
+        ? () => getCitiesMunicipalities(mode, subdivisionCode)
+        : noSubdivisions && regionCode
+          ? () => getCitiesMunicipalitiesByRegion(regionCode)
+          : null;
+      if (!fetchCities) {
         setCities([]);
         return;
       }
       setLoading((l) => ({ ...l, cities: true }));
-      getCitiesMunicipalities(mode, subdivisionCode)
+      fetchCities()
         .then((data) => !isCancelled() && setCities(data))
         .finally(() => !isCancelled() && setLoading((l) => ({ ...l, cities: false })));
     },
-    [subdivisionCode, mode],
+    [subdivisionCode, mode, noSubdivisions, regionCode],
   );
 
   useCancelableEffect(
@@ -259,15 +280,16 @@ export function PsgcPhLocationHierarchyField({
       return;
     }
     const region = regions.find((r) => r.code === regionCode);
+    // subdivision is absent on the no-subdivision shortcut (NCR) — it's optional here.
     const subdivision = subdivisions.find((s) => s.code === subdivisionCode);
     const city = cities.find((c) => c.code === code);
-    if (!region || !subdivision || !city) return;
+    if (!region || !city) return;
     onChange({
       mode,
       regionCode: region.code,
       regionName: region.name,
-      subdivisionCode: subdivision.code,
-      subdivisionName: subdivision.name,
+      subdivisionCode: subdivision?.code ?? "",
+      subdivisionName: subdivision?.name ?? "",
       cityMunicipalityCode: city.code,
       cityMunicipalityName: city.name,
       barangayCode: "",
@@ -279,18 +301,19 @@ export function PsgcPhLocationHierarchyField({
 
   const handleBarangayChange = (code: string) => {
     const region = regions.find((r) => r.code === regionCode);
+    // subdivision is absent on the no-subdivision shortcut (NCR) — it's optional here.
     const subdivision = subdivisions.find((s) => s.code === subdivisionCode);
     const city = cities.find((c) => c.code === cityCode);
     const barangay = barangays.find((b) => b.code === code);
-    if (!region || !subdivision || !city || !barangay) return;
+    if (!region || !city || !barangay) return;
 
     setBarangayCode(code);
     onChange({
       mode,
       regionCode: region.code,
       regionName: region.name,
-      subdivisionCode: subdivision.code,
-      subdivisionName: subdivision.name,
+      subdivisionCode: subdivision?.code ?? "",
+      subdivisionName: subdivision?.name ?? "",
       cityMunicipalityCode: city.code,
       cityMunicipalityName: city.name,
       barangayCode: barangay.code,
@@ -309,7 +332,10 @@ export function PsgcPhLocationHierarchyField({
       placeholder: loading.regions ? "Loading..." : "Region",
     },
   ];
-  if (regionCode && maxDepth >= LEVEL_DEPTH.province) {
+  // Skip the subdivision column entirely for regions that have none (NCR) — jump straight to
+  // City/Municipality. While the subdivision list is still loading, noSubdivisions is false, so
+  // the column shows a "Loading..." state and only disappears if it resolves empty.
+  if (regionCode && maxDepth >= LEVEL_DEPTH.province && !noSubdivisions) {
     columns.push({
       value: subdivisionCode || undefined,
       onChange: handleSubdivisionChange,
@@ -318,7 +344,7 @@ export function PsgcPhLocationHierarchyField({
       placeholder: loading.subdivisions ? "Loading..." : mode === "district" ? "District" : "Province",
     });
   }
-  if (subdivisionCode && maxDepth >= LEVEL_DEPTH.city) {
+  if ((subdivisionCode || (noSubdivisions && regionCode)) && maxDepth >= LEVEL_DEPTH.city) {
     columns.push({
       value: cityCode || undefined,
       onChange: handleCityChange,
