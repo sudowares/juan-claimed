@@ -15,6 +15,9 @@ export const fetchAllFieldInputTypes = async () => {
 export const fetchFieldConditionOperators = async (fieldInputTypeId?: string) => {
   return await prisma.dimFieldConditionOperator.findMany({
     where: fieldInputTypeId ? { fieldInputTypeId } : {},
-    orderBy: { englishName: "asc" },
+    // Seed-definition order (fieldConfig.ts's operatorsData) — the seeder upserts that array
+    // sequentially, so createdAt asc reproduces it. englishName is a deterministic tiebreaker
+    // for any rows that share a timestamp.
+    orderBy: [{ createdAt: "asc" }, { englishName: "asc" }],
   });
 };

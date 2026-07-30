@@ -774,7 +774,7 @@ export function FieldFormModal({ open, onOpenChange, field, viewOnly, classifica
           )}
 
           {isRepeaterType && (
-            <TabsContent value="subfields" className="space-y-6 pt-4" inert={viewOnly || undefined}>
+            <TabsContent value="subfields" className="space-y-6 pt-4">
               <p className="text-xs text-muted-foreground">
                 Each row of this repeater group is made up of these subfields — one level nested, each with its own type and configuration.
               </p>

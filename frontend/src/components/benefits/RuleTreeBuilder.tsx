@@ -1,6 +1,9 @@
+import * as React from "react";
 import { Plus, Trash2, FolderPlus } from "lucide-react";
 import type { DimField, DimFieldConditionOperator, DimFieldHierarchy, RuleTreeNode, RuleTreeRoot } from "@/types/domain";
 import { ConditionValueInput } from "@/components/fields/ConditionValueInput";
+import { useAuth } from "@/lib/auth";
+import { getSubfields } from "@/services/fields.service";
 import { Button } from "@/components/ui/button";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Badge } from "@/components/ui/badge";
@@ -23,13 +26,40 @@ const LOGICAL_OPERATOR_OPTIONS = [
   { value: "ANY", label: "ANY of" },
 ];
 
-function operatorsFor(operators: DimFieldConditionOperator[], fieldInputTypeId: string): DimFieldConditionOperator[] {
-  return operators.filter((o) => o.fieldInputTypeId === fieldInputTypeId);
+// REPEATER_GROUP operators fall in three groups (see condition.util.ts's evaluateRepeaterGroup):
+// - ROW: ANY_MATCH/ALL_MATCH — a per-row sub-condition tree. Always available.
+// - COUNT: COUNT_* — off the row count. Always available (needs no particular column).
+// - COLUMN: SUM/MIN/MAX/AVERAGE_* — aggregate ONE numeric subfield. Only offered when the
+//   repeater actually has a NUMBER/MONEY subfield to aggregate, so an admin can't author an
+//   aggregate the repeater's shape can't satisfy.
+const REPEATER_ROW_OPERATORS = new Set(["ANY_MATCH", "ALL_MATCH"]);
+const REPEATER_COUNT_OPERATORS = new Set(["COUNT_EQUALS", "COUNT_GREATER_THAN", "COUNT_LESS_THAN"]);
+const REPEATER_COLUMN_OPERATORS = new Set([
+  "SUM_EQUALS",
+  "SUM_GREATER_THAN",
+  "SUM_LESS_THAN",
+  "MIN_EQUALS",
+  "MIN_GREATER_THAN",
+  "MIN_LESS_THAN",
+  "MAX_EQUALS",
+  "MAX_GREATER_THAN",
+  "MAX_LESS_THAN",
+  "AVERAGE_EQUALS",
+  "AVERAGE_GREATER_THAN",
+  "AVERAGE_LESS_THAN",
+]);
+
+function operatorsFor(operators: DimFieldConditionOperator[], field: DimField, hasNumericSubfield = false): DimFieldConditionOperator[] {
+  const list = operators.filter((o) => o.fieldInputTypeId === field.fieldInputTypeId);
+  if (field.fieldInputType.value !== "REPEATER_GROUP") return list;
+  return list.filter(
+    (o) => REPEATER_ROW_OPERATORS.has(o.value) || REPEATER_COUNT_OPERATORS.has(o.value) || (REPEATER_COLUMN_OPERATORS.has(o.value) && hasNumericSubfield),
+  );
 }
 
 function emptyCondition(fields: DimField[], operators: DimFieldConditionOperator[]): RuleTreeNode {
   const field = fields[0];
-  const operator = field ? operatorsFor(operators, field.fieldInputTypeId)[0] : undefined;
+  const operator = field ? operatorsFor(operators, field)[0] : undefined;
   return { kind: "condition", id: newId(), fieldId: field?.id ?? "", fieldConditionOperatorId: operator?.id ?? "", conditionFieldValue: null };
 }
 
@@ -136,13 +166,32 @@ function ConditionLeafEditor({
   onChange: (node: RuleTreeNode) => void;
   onRemove: () => void;
 }) {
+  const { token } = useAuth();
   const field = fields.find((f) => f.id === node.fieldId);
-  const fieldOperators = field ? operatorsFor(operators, field.fieldInputTypeId) : [];
+  const isRepeater = field?.fieldInputType.value === "REPEATER_GROUP";
+
+  // A repeater's column-aggregate operators (SUM/MIN/MAX/AVERAGE) are only valid when it has a
+  // NUMBER/MONEY subfield to aggregate — fetch the subfields to know whether to offer them.
+  const [subfields, setSubfields] = React.useState<DimField[]>([]);
+  React.useEffect(() => {
+    if (!isRepeater || !field || !token) {
+      setSubfields([]);
+      return;
+    }
+    let cancelled = false;
+    getSubfields(field.id, token).then((result) => !cancelled && setSubfields(result));
+    return () => {
+      cancelled = true;
+    };
+  }, [isRepeater, field?.id, token]);
+  const hasNumericSubfield = subfields.some((s) => s.fieldInputType.value === "NUMBER" || s.fieldInputType.value === "MONEY");
+
+  const fieldOperators = field ? operatorsFor(operators, field, hasNumericSubfield) : [];
   const operator = fieldOperators.find((o) => o.id === node.fieldConditionOperatorId);
 
   const handleFieldChange = (fieldId: string) => {
     const nextField = fields.find((f) => f.id === fieldId);
-    const nextOperator = nextField ? operatorsFor(operators, nextField.fieldInputTypeId)[0] : undefined;
+    const nextOperator = nextField ? operatorsFor(operators, nextField)[0] : undefined;
     onChange({ ...node, fieldId, fieldConditionOperatorId: nextOperator?.id ?? "", conditionFieldValue: null });
   };
 
@@ -167,7 +216,14 @@ function ConditionLeafEditor({
       )}
 
       {field && operator && (
-        <ConditionValueInput field={field} operator={operator} hierarchies={hierarchies} value={node.conditionFieldValue} onChange={(v) => onChange({ ...node, conditionFieldValue: v })} />
+        <ConditionValueInput
+          field={field}
+          operator={operator}
+          hierarchies={hierarchies}
+          operators={operators}
+          value={node.conditionFieldValue}
+          onChange={(v) => onChange({ ...node, conditionFieldValue: v })}
+        />
       )}
 
       {field?.default && (

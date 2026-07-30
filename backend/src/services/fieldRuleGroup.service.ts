@@ -366,16 +366,38 @@ export const editDynamicRuleGroupTreeWith = async (db: DbClient, fieldId: string
   const field = await assertFieldCanHaveDynamicRuleGroup(fieldId, db);
   await assertDependencyClassificationAllowed(db, field.classification, tree);
 
-  const existingGroups = await db.fctDynamicRuleGroup.findMany({ where: { fieldId }, select: { id: true } });
-  const groupIds = existingGroups.map((g) => g.id);
+  const rawGroups = await db.fctDynamicRuleGroup.findMany({ where: { fieldId }, select: { id: true } });
+  const rawGroupIds = rawGroups.map((g) => g.id);
 
-  if (groupIds.length > 0) {
+  if (rawGroupIds.length > 0) {
+    const rawConditions = await db.fctDynamicFieldCondition.findMany({
+      where: { dynamicRuleGroupId: { in: rawGroupIds } },
+      select: { id: true, dynamicRuleGroupId: true },
+    });
+
+    // A benefit eligibility leaf parks a private throwaway rule-group under this same fieldId
+    // (see benefitRuleGroup.service.ts) purely to satisfy FctDynamicFieldCondition's required
+    // columns. Those rows are FK-referenced by DimBenefitFieldCondition, so deleting them trips
+    // P2003. Exclude them here exactly as the READ path (fetchDynamicRuleGroupTreeWith) does, so
+    // edit only replaces this field's OWN visibility groups and never collides with a benefit.
+    const { groups, conditions } = await excludeBenefitThrowawayGroups(db, rawGroups, rawConditions);
+    // Delete conditions by id (only the surviving REAL ones) — not by dynamicRuleGroupId, since
+    // the throwaway groups share this fieldId and a by-group delete would still reach them.
+    const conditionIds = conditions.map((c) => c.id);
+    const groupIds = groups.map((g) => g.id);
+
     try {
-      await db.fctDynamicFieldCondition.deleteMany({ where: { dynamicRuleGroupId: { in: groupIds } } });
-      await db.fctDynamicRuleGroup.deleteMany({ where: { id: { in: groupIds } } });
+      if (conditionIds.length > 0) {
+        await db.fctDynamicFieldCondition.deleteMany({ where: { id: { in: conditionIds } } });
+      }
+      if (groupIds.length > 0) {
+        await db.fctDynamicRuleGroup.deleteMany({ where: { id: { in: groupIds } } });
+      }
     } catch (error) {
+      // After excluding throwaways nothing benefit-referenced should remain, but keep the
+      // mapping as defence so any real remaining FK-in-use still surfaces meaningfully.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2003") {
-        console.error(`[DynamicRuleGroupService] Cannot replace field "${fieldId}"'s condition tree — a leaf is still wrapped into a benefit's eligibility rule.`);
+        console.error(`[DynamicRuleGroupService] Cannot replace field "${fieldId}"'s condition tree — a leaf is still referenced elsewhere.`);
         throw new Error("CONDITION_TREE_IN_USE_BY_BENEFIT");
       }
       throw error;

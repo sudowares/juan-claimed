@@ -219,8 +219,15 @@ export function BenefitFormModal({ open, onOpenChange, benefit, viewOnly, onSave
   // PH_LOCATION-backed field is excluded from RuleTreeBuilder's own field picker entirely.
   // Fields' own dependency conditioning (FieldConditionTreeBuilder.tsx) is unaffected.
   const phLocationHierarchyId = React.useMemo(() => hierarchies.find((h) => h.key === PH_LOCATION_HIERARCHY_KEY)?.id, [hierarchies]);
+  // What's conditionable is governed by the DB `notConditional` tag, already enforced at the
+  // query level (getFields({ conditionable: true }) -> field.service.ts's notConditional filter)
+  // — NOT by input type here. So REPEATER_GROUP fields (conditioned via ANY_MATCH/ALL_MATCH,
+  // see RuleTreeBuilder/ConditionValueInput) and eGov-backed ones alike show if their tag allows.
+  // The only two things dropped here are structural, not policy: repeater SUBFIELDS
+  // (parentFieldId set — they're columns, conditioned through their parent's per-row tree, never
+  // standalone) and the PH_LOCATION residence field (handled by the Scope tab, see above).
   const topLevelFields = React.useMemo(
-    () => fields.filter((f) => f.parentFieldId === null && f.fieldInputType.value !== "REPEATER_GROUP" && f.fieldHierarchyId !== phLocationHierarchyId),
+    () => fields.filter((f) => f.parentFieldId === null && f.fieldHierarchyId !== phLocationHierarchyId),
     [fields, phLocationHierarchyId],
   );
 

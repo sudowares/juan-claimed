@@ -1,9 +1,12 @@
 import * as React from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { getFieldOptions } from "@/services/fieldOptions.service";
+import { getSubfields } from "@/services/fields.service";
 import { getRegions, getSubdivisions, getCitiesMunicipalities, getBarangays } from "@/services/psgc.service";
 import type { DimField, DimFieldConditionOperator, DimFieldHierarchy, DimFieldHierarchyNode, DimFieldOption } from "@/types/domain";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { SearchableSelect, MultiSearchableSelect, type SelectFieldOption } from "@/components/ui/searchable-select";
 import { HierarchyMultiLevelSelector } from "@/components/fields/HierarchyMultiLevelSelector";
 
@@ -50,6 +53,11 @@ interface ConditionValueInputProps {
    * already load for their own hierarchy-authoring UI, threaded down here so a
    * HIERARCHY_SELECT condition's value picker uses the real node tree instead of a mock. */
   hierarchies: DimFieldHierarchy[];
+  /** Full operator set — only needed for a REPEATER_GROUP field's ANY_MATCH/ALL_MATCH value,
+   * whose editor (RepeaterRowConditionBuilder) has its own per-subfield operator pickers.
+   * Every other input type resolves its operator upstream, so callers that never surface a
+   * repeater field can omit it. */
+  operators?: DimFieldConditionOperator[];
 }
 
 const DURATION_UNIT_OPTIONS = ["days", "weeks", "months", "years"].map((u) => ({ value: u, label: u }));
@@ -62,7 +70,7 @@ const BOOLEAN_OPTIONS = [
 // The threshold/target-value editor for one condition leaf in a benefit's eligibility
 // tree — a sibling to FieldInput (which edits an applicant's *answer*), built against the
 // same per-operator targetValue shapes documented in backend/docs/condition-value-shapes.md.
-export function ConditionValueInput({ field, operator, value, onChange, hierarchies }: ConditionValueInputProps) {
+export function ConditionValueInput({ field, operator, value, onChange, hierarchies, operators }: ConditionValueInputProps) {
   const { token } = useAuth();
   const inputType = field.fieldInputType.value;
   const op = operator.value;
@@ -88,6 +96,32 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
   // only checked for HIERARCHY_SELECT below, so every other type (TEXT, DATE, NUMBER, ...)
   // still rendered a value input nobody could ever fill in meaningfully for these operators.
   if (op === "IS_EMPTY" || op === "IS_NOT_EMPTY") return null;
+
+  // REPEATER_GROUP has three value shapes, keyed off the operator (see condition.util.ts's
+  // evaluateRepeaterGroup):
+  // - ANY_MATCH/ALL_MATCH: a mini per-row AND/OR tree over the subfields (RepeaterRowConditionBuilder).
+  // - COUNT_*: just a numeric threshold on the row count -> { value }.
+  // - SUM/MIN/MAX/AVERAGE_*: a numeric subfield to aggregate + a threshold -> { subfieldId, value }.
+  if (inputType === "REPEATER_GROUP") {
+    if (op === "ANY_MATCH" || op === "ALL_MATCH") {
+      if (!operators) return <span className="text-xs text-muted-foreground italic">Repeater conditions aren't available here.</span>;
+      return <RepeaterRowConditionBuilder field={field} operators={operators} hierarchies={hierarchies} value={value} onChange={onChange} />;
+    }
+    if (op === "COUNT_EQUALS" || op === "COUNT_GREATER_THAN" || op === "COUNT_LESS_THAN") {
+      const v = (value as { value?: number }) ?? {};
+      return (
+        <Input
+          type="number"
+          value={v.value ?? ""}
+          onChange={(e) => onChange({ value: Number(e.target.value) })}
+          placeholder="Rows"
+          className="w-24"
+        />
+      );
+    }
+    // SUM / MIN / MAX / AVERAGE — pick which numeric column, then the threshold.
+    return <RepeaterAggregateInput field={field} value={value} onChange={onChange} />;
+  }
 
   // DURATION's own BETWEEN needs a unit alongside min/max — same shape as AGE_BETWEEN below
   // (backend's toDurationRangeDays requires {min, max, unit}) — checked before the generic
@@ -229,5 +263,213 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
       placeholder="Value"
       className="w-32"
     />
+  );
+}
+
+// --- REPEATER_GROUP per-row condition editor ---------------------------------
+// The target value for a REPEATER_GROUP ANY_MATCH/ALL_MATCH leaf is a single-root mini
+// rule-group tree, [{ logicalOperator, conditions }], evaluated against each of the
+// applicant's repeater rows (condition.util.ts's evaluateRepeaterGroup -> matchRepeaterRow).
+// Each inner leaf is { fieldId, inputType, operator, conditionFieldValue } where fieldId is a
+// SUBFIELD id (a lookup key into the row, not a top-level referenced field), and inputType/
+// operator are the resolved `.value` strings (the row carries no operator ids). Kept flat
+// here (one root group, leaf conditions only) — the backend supports nesting, but a single
+// AND/OR list covers the real authoring need without a recursive UI.
+
+interface RepeaterLeaf {
+  fieldId: string;
+  inputType: string;
+  operator: string;
+  conditionFieldValue: unknown;
+}
+interface RepeaterRootGroup {
+  logicalOperator: "ALL" | "ANY";
+  conditions: RepeaterLeaf[];
+}
+
+const REPEATER_ROW_MATCH_OPTIONS = [
+  { value: "ALL", label: "ALL of" },
+  { value: "ANY", label: "ANY of" },
+];
+
+function normalizeRepeaterValue(value: unknown): RepeaterRootGroup {
+  if (Array.isArray(value) && value[0] && typeof value[0] === "object") {
+    const root = value[0] as Partial<RepeaterRootGroup>;
+    return {
+      logicalOperator: root.logicalOperator === "ANY" ? "ANY" : "ALL",
+      conditions: Array.isArray(root.conditions) ? (root.conditions as RepeaterLeaf[]) : [],
+    };
+  }
+  return { logicalOperator: "ALL", conditions: [] };
+}
+
+function RepeaterRowConditionBuilder({
+  field,
+  operators,
+  hierarchies,
+  value,
+  onChange,
+}: {
+  field: DimField;
+  operators: DimFieldConditionOperator[];
+  hierarchies: DimFieldHierarchy[];
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const { token } = useAuth();
+  const [subfields, setSubfields] = React.useState<DimField[]>([]);
+
+  React.useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getSubfields(field.id, token).then((result) => !cancelled && setSubfields(result));
+    return () => {
+      cancelled = true;
+    };
+  }, [field.id, token]);
+
+  const root = normalizeRepeaterValue(value);
+  const emit = (next: RepeaterRootGroup) => onChange([next]);
+
+  const subfieldOperators = (subfield: DimField | undefined) =>
+    subfield ? operators.filter((o) => o.fieldInputTypeId === subfield.fieldInputTypeId) : [];
+
+  const updateLeaf = (index: number, patch: Partial<RepeaterLeaf>) =>
+    emit({ ...root, conditions: root.conditions.map((c, i) => (i === index ? { ...c, ...patch } : c)) });
+
+  const removeLeaf = (index: number) => emit({ ...root, conditions: root.conditions.filter((_, i) => i !== index) });
+
+  const addLeaf = () => {
+    const subfield = subfields[0];
+    const operator = subfieldOperators(subfield)[0];
+    emit({
+      ...root,
+      conditions: [
+        ...root.conditions,
+        {
+          fieldId: subfield?.id ?? "",
+          inputType: subfield?.fieldInputType.value ?? "",
+          operator: operator?.value ?? "",
+          conditionFieldValue: null,
+        },
+      ],
+    });
+  };
+
+  const changeSubfield = (index: number, subfieldId: string) => {
+    const subfield = subfields.find((s) => s.id === subfieldId);
+    const operator = subfieldOperators(subfield)[0];
+    updateLeaf(index, {
+      fieldId: subfieldId,
+      inputType: subfield?.fieldInputType.value ?? "",
+      operator: operator?.value ?? "",
+      conditionFieldValue: null,
+    });
+  };
+
+  return (
+    <div className="w-full space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-medium text-muted-foreground">Any row where</span>
+        <SearchableSelect
+          value={root.logicalOperator}
+          onChange={(v) => emit({ ...root, logicalOperator: v as "ALL" | "ANY" })}
+          options={REPEATER_ROW_MATCH_OPTIONS}
+          triggerClassName="w-24"
+        />
+        <span className="text-xs text-muted-foreground">these hold:</span>
+      </div>
+
+      {root.conditions.length === 0 && <p className="text-xs text-muted-foreground">No row conditions yet — add one below.</p>}
+
+      {root.conditions.map((leaf, index) => {
+        const subfield = subfields.find((s) => s.id === leaf.fieldId);
+        const leafOperators = subfieldOperators(subfield);
+        const operator = leafOperators.find((o) => o.value === leaf.operator);
+        return (
+          <div key={index} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background px-3 py-2.5">
+            <SearchableSelect
+              value={leaf.fieldId}
+              onChange={(v) => changeSubfield(index, v)}
+              options={subfields.map((s) => ({ value: s.id, label: s.englishName, sublabel: s.tagalogName }))}
+              placeholder="Column"
+              triggerClassName="w-44"
+            />
+            {subfield && (
+              <SearchableSelect
+                value={leaf.operator}
+                onChange={(v) => updateLeaf(index, { operator: v, conditionFieldValue: null })}
+                options={leafOperators.map((o) => ({ value: o.value, label: o.englishName, sublabel: o.tagalogName }))}
+                placeholder="Operator"
+                triggerClassName="w-40"
+              />
+            )}
+            {subfield && operator && (
+              <ConditionValueInput
+                field={subfield}
+                operator={operator}
+                hierarchies={hierarchies}
+                operators={operators}
+                value={leaf.conditionFieldValue}
+                onChange={(v) => updateLeaf(index, { conditionFieldValue: v })}
+              />
+            )}
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="ml-auto size-7 text-muted-foreground hover:text-destructive"
+              onClick={() => removeLeaf(index)}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
+          </div>
+        );
+      })}
+
+      <Button type="button" size="sm" variant="outline" disabled={subfields.length === 0} onClick={addLeaf}>
+        <Plus /> Add Row Condition
+      </Button>
+    </div>
+  );
+}
+
+// SUM/MIN/MAX/AVERAGE target editor — { subfieldId, value }. Only NUMBER/MONEY subfields are
+// aggregatable (evaluateRepeaterGroup coerces the column to numbers), so only those are
+// offered. RuleTreeBuilder already hides these operators entirely when the repeater has no
+// numeric subfield, so the "no number column" state here is just a defensive fallback.
+function RepeaterAggregateInput({ field, value, onChange }: { field: DimField; value: unknown; onChange: (value: unknown) => void }) {
+  const { token } = useAuth();
+  const [subfields, setSubfields] = React.useState<DimField[]>([]);
+
+  React.useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    getSubfields(field.id, token).then((result) => !cancelled && setSubfields(result));
+    return () => {
+      cancelled = true;
+    };
+  }, [field.id, token]);
+
+  const numericSubfields = subfields.filter((s) => s.fieldInputType.value === "NUMBER" || s.fieldInputType.value === "MONEY");
+  const v = (value as { subfieldId?: string; value?: number }) ?? {};
+
+  return (
+    <div className="flex items-center gap-2">
+      <SearchableSelect
+        value={v.subfieldId ?? undefined}
+        onChange={(subfieldId) => onChange({ ...v, subfieldId })}
+        options={numericSubfields.map((s) => ({ value: s.id, label: s.englishName, sublabel: s.tagalogName }))}
+        placeholder={numericSubfields.length === 0 ? "No number column" : "Column"}
+        triggerClassName="w-40"
+      />
+      <Input
+        type="number"
+        value={v.value ?? ""}
+        onChange={(e) => onChange({ ...v, value: Number(e.target.value) })}
+        placeholder="Value"
+        className="w-24"
+      />
+    </div>
   );
 }

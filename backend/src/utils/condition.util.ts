@@ -26,9 +26,16 @@ const toNumber = (value: unknown, label: ValueLabel): number => {
   return value;
 };
 
-const toNumberArray = (value: unknown, label: ValueLabel): number[] => {
-  if (!Array.isArray(value)) throw new Error(`INVALID_${label}_VALUE`);
-  return value.map((item) => toNumber(item, label));
+// A REPEATER_GROUP aggregate operator's target: a numeric threshold plus (for the
+// column aggregates SUM/MIN/MAX/AVERAGE) which subfield to aggregate over. COUNT_* ignore
+// subfieldId (they count rows), so it stays optional/null there.
+const toAggregateTarget = (value: unknown, label: ValueLabel): { subfieldId: string | null; value: number } => {
+  if (typeof value !== "object" || value === null || !("value" in value)) throw new Error(`INVALID_${label}_VALUE`);
+  const subfieldId = (value as { subfieldId?: unknown }).subfieldId;
+  return {
+    subfieldId: typeof subfieldId === "string" ? subfieldId : null,
+    value: toNumber((value as { value: unknown }).value, label),
+  };
 };
 
 const toStringArray = (value: unknown, label: ValueLabel): string[] => {
@@ -501,21 +508,39 @@ const evaluateRepeaterGroup = (operator: string, targetValue: unknown, actualVal
     return operator === "ANY_MATCH" ? actualValue.some(matchesRow) : actualValue.every(matchesRow);
   }
 
-  const actual = toNumberArray(actualValue, "ACTUAL");
-  const target = toNumber(targetValue, "TARGET");
-  const count = actual.length;
-  const sum = actual.reduce((s, n) => s + n, 0);
-  const min = count > 0 ? Math.min(...actual) : undefined;
-  const max = count > 0 ? Math.max(...actual) : undefined;
+  // Aggregate operators consume the SAME resolved row set ANY_MATCH/ALL_MATCH do
+  // (Array<Record<subfieldId, value>>) — unified so one repeater field can be both matched
+  // and aggregated within the same tree, and so the caller never has to know per-operator
+  // shapes. COUNT_* work off the row count; SUM/MIN/MAX/AVERAGE_* aggregate one numeric
+  // subfield named by the target's subfieldId.
+  if (!Array.isArray(actualValue)) throw new Error("INVALID_ACTUAL_VALUE");
+  const rows = actualValue as Record<string, unknown>[];
+  const { subfieldId, value: target } = toAggregateTarget(targetValue, "TARGET");
+
+  if (operator === "COUNT_EQUALS" || operator === "COUNT_GREATER_THAN" || operator === "COUNT_LESS_THAN") {
+    const count = rows.length;
+    switch (operator) {
+      case "COUNT_EQUALS":
+        return count === target;
+      case "COUNT_GREATER_THAN":
+        return count > target;
+      case "COUNT_LESS_THAN":
+        return count < target;
+    }
+  }
+
+  // SUM/MIN/MAX/AVERAGE need a numeric column. Rows missing that subfield, or holding a
+  // non-numeric value for it, are skipped (a blank optional cell shouldn't poison the whole
+  // aggregate) — so the aggregate is over the rows that actually have a number there.
+  if (!subfieldId) throw new Error("INVALID_TARGET_VALUE");
+  const nums = rows.map((row) => row[subfieldId]).filter((v): v is number => typeof v === "number" && !Number.isNaN(v));
+  const count = nums.length;
+  const sum = nums.reduce((s, n) => s + n, 0);
+  const min = count > 0 ? Math.min(...nums) : undefined;
+  const max = count > 0 ? Math.max(...nums) : undefined;
   const average = count > 0 ? sum / count : undefined;
 
   switch (operator) {
-    case "COUNT_EQUALS":
-      return count === target;
-    case "COUNT_GREATER_THAN":
-      return count > target;
-    case "COUNT_LESS_THAN":
-      return count < target;
     case "SUM_EQUALS":
       return sum === target;
     case "SUM_GREATER_THAN":

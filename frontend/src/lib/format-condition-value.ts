@@ -92,6 +92,26 @@ export function formatConditionValue(
     return resolveHierarchyNodeLabels(hierarchy, Array.isArray(value) ? value : [value]);
   }
 
+  // REPEATER_GROUP — value shape depends on the operator (see ConditionValueInput):
+  // ANY_MATCH/ALL_MATCH carry a mini per-row tree [{ logicalOperator, conditions }];
+  // COUNT_*/SUM_*/... carry { subfieldId?, value }. ConditionTreeView is a flat leaf list, so
+  // this is a compact summary, not a full nested render.
+  if (inputType === "REPEATER_GROUP") {
+    if (op === "ANY_MATCH" || op === "ALL_MATCH") {
+      const root = Array.isArray(value) && value[0] && typeof value[0] === "object" ? (value[0] as { logicalOperator?: string; conditions?: unknown[] }) : undefined;
+      const count = Array.isArray(root?.conditions) ? root!.conditions.length : 0;
+      const join = root?.logicalOperator === "ANY" ? "any" : "all";
+      const noun = count === 1 ? "condition" : "conditions";
+      return { en: `a row meeting ${join} of ${count} ${noun}`, tl: `hilera na tumutugon sa ${join} ng ${count} ${noun}` };
+    }
+    // COUNT_*/SUM_*/MIN_*/MAX_*/AVERAGE_* — the operator name already conveys the aggregate;
+    // show the threshold. (Which column, for SUM/etc, isn't resolvable to a name here without
+    // the subfield list — the operator label plus threshold is enough for the read-only view.)
+    const v = value as { value?: number };
+    const threshold = typeof v?.value === "number" ? String(v.value) : "?";
+    return { en: threshold, tl: threshold };
+  }
+
   // DATE / NUMBER / MONEY / TEXT single-value operators
   return { en: String(value), tl: String(value) };
 }

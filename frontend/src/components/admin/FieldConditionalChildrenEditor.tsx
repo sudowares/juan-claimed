@@ -287,6 +287,10 @@ function ChildRow({
   const inputType = inputTypes.find((t) => t.id === child.fieldInputTypeId);
   const isSelectType = inputType?.value === "SINGLE_SELECT" || inputType?.value === "MULTI_SELECT";
   const isHierarchyType = inputType?.value === "HIERARCHY_SELECT";
+  // IS_EMPTY/IS_NOT_EMPTY are presence checks — no target value at all, same as
+  // ConditionValueInput.tsx suppresses in the main condition builder.
+  const triggerOperatorValue = triggerOperators.find((o) => o.id === child.triggerOperatorId)?.value;
+  const isPresenceOnlyTrigger = triggerOperatorValue === "IS_EMPTY" || triggerOperatorValue === "IS_NOT_EMPTY";
 
   const nameTranslate = useAutoTranslate({ sourceValue: child.englishName, onTargetChange: (v) => onChange({ tagalogName: v }), token, enabled: !disabled });
   const descriptionTranslate = useAutoTranslate({ sourceValue: child.englishDescription, onTargetChange: (v) => onChange({ tagalogDescription: v }), token, enabled: !disabled });
@@ -314,14 +318,16 @@ function ChildRow({
             <p className="mb-2 text-xs font-medium text-muted-foreground">
               Shows when <span className="font-semibold text-foreground">{parentField.englishName}</span>:
             </p>
-            <div className="flex flex-wrap items-end gap-2">
+            <div className="grid grid-cols-1 items-end gap-3 sm:grid-cols-2">
               <SelectField
                 label="Operator"
                 value={child.triggerOperatorId}
                 onChange={(v) => onChange({ triggerOperatorId: v, triggerValue: null })}
                 options={triggerOperators.map((o) => ({ value: o.id, label: o.englishName, sublabel: o.tagalogName }))}
               />
-              <TriggerValueInput parentField={parentField} parentOptions={parentOptions} value={child.triggerValue} onChange={(v) => onChange({ triggerValue: v })} />
+              {!isPresenceOnlyTrigger && (
+                <TriggerValueInput parentField={parentField} parentOptions={parentOptions} value={child.triggerValue} onChange={(v) => onChange({ triggerValue: v })} />
+              )}
             </div>
           </div>
 

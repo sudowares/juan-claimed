@@ -198,7 +198,10 @@ function SubfieldRow({
       </div>
 
       {expanded && (
-        <div className="space-y-4 border-t border-border p-3">
+        // In view mode the collapse toggle above stays live (so rows can still be opened/closed
+        // to read), but the editable body is locked here — pushed down to this content div
+        // instead of inert-ing the whole tab, which would have frozen the toggle too.
+        <div className="space-y-4 border-t border-border p-3" inert={disabled || undefined}>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <TextField label="English Name" value={subfield.englishName} onChange={(v) => onChange({ englishName: v })} required />
             <TextField label="Tagalog Name" value={subfield.tagalogName} onChange={nameTranslate.handleTargetChange} required badge={nameTranslate.badge} />
