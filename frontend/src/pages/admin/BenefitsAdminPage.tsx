@@ -1,7 +1,8 @@
 import * as React from "react";
-import { Gift, Plus, Pencil, Eye } from "lucide-react";
+import { Gift, Plus, Pencil, Eye, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getBenefits } from "@/services/benefits.service";
+import { getBenefits, deleteBenefit } from "@/services/benefits.service";
+import { useAlert } from "@/lib/alert-store";
 import { formatBenefitScope } from "@/lib/benefit-scope";
 import type { FctBenefit } from "@/types/domain";
 import { BenefitFormModal } from "@/components/benefits/BenefitFormModal";
@@ -11,6 +12,7 @@ import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
 
 export function BenefitsAdminPage() {
   const { token, role } = useAuth();
+  const { showConfirm, showApiError } = useAlert();
   const canManage = role === "SUPERADMIN" || role === "AGENT";
 
   const [benefits, setBenefits] = React.useState<FctBenefit[] | null>(null);
@@ -43,6 +45,23 @@ export function BenefitsAdminPage() {
     setEditing(benefit);
     setViewOnly(true);
     setModalOpen(true);
+  };
+
+  const handleDelete = (benefit: FctBenefit) => {
+    if (!token) return;
+    showConfirm({
+      title: "Delete benefit",
+      message: `Are you sure you want to delete "${benefit.name}"? This can't be undone.`,
+      confirmLabel: "Delete",
+      onConfirm: async () => {
+        try {
+          await deleteBenefit(benefit.id, token);
+          load();
+        } catch (err) {
+          showApiError(err, "Could not delete the benefit.");
+        }
+      },
+    });
   };
 
   const columns: DataTableColumn<FctBenefit>[] = [
@@ -86,6 +105,11 @@ export function BenefitsAdminPage() {
           <Button size="icon" variant="ghost" className="size-8" onClick={() => openView(b)} title="View">
             <Eye className="size-4" />
           </Button>
+          {canManage && (
+            <Button size="icon" variant="ghost" className="size-8 text-muted-foreground hover:text-destructive" onClick={() => handleDelete(b)} title="Delete">
+              <Trash2 className="size-4" />
+            </Button>
+          )}
         </div>
       ),
     },

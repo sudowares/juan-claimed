@@ -10,6 +10,18 @@ interface ShowAlertInput {
   /** Defaults to the modal's own "xs" — widen for a longer message (e.g. a multi-line
    * bulleted validation list), which reads cramped at the default width. */
   size?: ModalSize;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  onConfirm?: () => void;
+}
+
+interface ShowConfirmInput {
+  message: string;
+  title?: string;
+  size?: ModalSize;
+  /** Defaults to "Delete". */
+  confirmLabel?: string;
+  onConfirm: () => void;
 }
 
 interface AlertContextValue {
@@ -17,6 +29,9 @@ interface AlertContextValue {
   /** Convenience for a catch block: shows `err.message` (backend's own `error` string) as
    * an error alert if `err` is an ApiError, otherwise a generic fallback. */
   showApiError: (err: unknown, fallback?: string) => void;
+  /** A destructive confirm dialog (Cancel + a destructive confirm button). Runs onConfirm
+   * only if the user confirms. */
+  showConfirm: (input: ShowConfirmInput) => void;
 }
 
 const AlertContext = React.createContext<AlertContextValue | null>(null);
@@ -33,13 +48,35 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
-  const value = React.useMemo(() => ({ showAlert, showApiError }), [showAlert, showApiError]);
+  const showConfirm = React.useCallback((input: ShowConfirmInput) => {
+    setState({
+      variant: "warning",
+      message: input.message,
+      title: input.title ?? "Are you sure?",
+      size: input.size,
+      confirmLabel: input.confirmLabel ?? "Delete",
+      cancelLabel: "Cancel",
+      onConfirm: input.onConfirm,
+    });
+  }, []);
+
+  const value = React.useMemo(() => ({ showAlert, showApiError, showConfirm }), [showAlert, showApiError, showConfirm]);
 
   return (
     <AlertContext.Provider value={value}>
       {children}
       {state && (
-        <AlertModal open={!!state} onOpenChange={(open) => !open && setState(null)} variant={state.variant} title={state.title} message={state.message} size={state.size} />
+        <AlertModal
+          open={!!state}
+          onOpenChange={(open) => !open && setState(null)}
+          variant={state.variant}
+          title={state.title}
+          message={state.message}
+          size={state.size}
+          confirmLabel={state.confirmLabel}
+          cancelLabel={state.cancelLabel}
+          onConfirm={state.onConfirm}
+        />
       )}
     </AlertContext.Provider>
   );

@@ -209,6 +209,7 @@ const resolveAnchor = async (
 export const fetchAllFields = async (classification?: "GLOBAL" | "FOLLOW_UP", conditionable?: boolean) => {
   const fields = await prisma.dimField.findMany({
     where: {
+      deletedAt: null,
       ...(classification ? { classification } : {}),
       ...(conditionable ? { notConditional: { not: true } } : {}),
     },
@@ -226,7 +227,7 @@ export const fetchAllFields = async (classification?: "GLOBAL" | "FOLLOW_UP", co
 
 // FETCH SINGLE FIELD BY ID
 export const fetchFieldById = async (id: string) => {
-  const field = await prisma.dimField.findUnique({ where: { id }, include: { fieldInputType: true } });
+  const field = await prisma.dimField.findFirst({ where: { id, deletedAt: null }, include: { fieldInputType: true } });
 
   if (!field) {
     console.error(`[FieldService] Retrieval failed: Field with ID "${id}" does not exist.`);
@@ -679,13 +680,63 @@ export const reorderFields = async (classification: "GLOBAL" | "FOLLOW_UP", orde
 };
 
 // REMOVE FIELD
+// Benefits whose eligibility rule conditions on this field. A benefit eligibility leaf
+// (DimBenefitFieldCondition) wraps a throwaway FctDynamicFieldCondition sitting on an
+// FctDynamicRuleGroup tagged with fieldId (see benefitRuleGroup.service.ts) — so a field is
+// "bound to" a benefit when such a leaf exists for it. Used to warn before delete AND to
+// unbind on delete. Deduped by benefit; excludes soft-deleted benefits.
+export const getFieldBenefitBindings = async (fieldId: string): Promise<{ id: string; name: string }[]> => {
+  const leaves = await prisma.dimBenefitFieldCondition.findMany({
+    where: {
+      deletedAt: null,
+      benefitFieldCondition: { dynamicRuleGroup: { fieldId } },
+      benefitRuleGroup: { benefit: { deletedAt: null } },
+    },
+    select: { benefitRuleGroup: { select: { benefit: { select: { id: true, name: true } } } } },
+  });
+
+  const byId = new Map<string, string>();
+  for (const leaf of leaves) {
+    const benefit = leaf.benefitRuleGroup?.benefit;
+    if (benefit) byId.set(benefit.id, benefit.name);
+  }
+  return [...byId].map(([id, name]) => ({ id, name }));
+};
+
+// Soft-deletes the field (mirrors FctBenefit's own soft delete — DimField has deletedAt, and
+// the field list/detail queries now filter deletedAt: null, so it simply disappears). Before
+// that, UNBINDS it from any benefit eligibility rule by hard-deleting that field's benefit
+// leaves and their throwaway dynamic plumbing (FctDynamicRuleGroup/FctBenefitRuleGroup carry
+// no deletedAt and are always hard-deleted — same rows editBenefitRuleTreeWith removes). The
+// field's OWN dynamicCondition rows are left alone: harmless once the field is hidden.
 export const removeField = async (id: string) => {
-  const existingField = await prisma.dimField.findUnique({ where: { id } });
+  const existingField = await prisma.dimField.findFirst({ where: { id, deletedAt: null } });
 
   if (!existingField) {
     console.error(`[FieldService] Deletion failed: Field with ID "${id}" does not exist.`);
     throw new Error("FIELD_NOT_FOUND");
   }
 
-  return await prisma.dimField.delete({ where: { id } });
+  return await prisma.$transaction(async (tx) => {
+    const boundLeaves = await tx.dimBenefitFieldCondition.findMany({
+      where: { benefitFieldCondition: { dynamicRuleGroup: { fieldId: id } } },
+      select: { id: true, benefitFieldConditionId: true },
+    });
+
+    if (boundLeaves.length > 0) {
+      const dynamicFieldConditionIds = boundLeaves.map((l) => l.benefitFieldConditionId);
+      const groups = await tx.fctDynamicFieldCondition.findMany({
+        where: { id: { in: dynamicFieldConditionIds } },
+        select: { dynamicRuleGroupId: true },
+      });
+      const dynamicRuleGroupIds = [...new Set(groups.map((g) => g.dynamicRuleGroupId))];
+
+      // Order matters (FK dependents first): benefit leaf -> its dynamic condition -> its group.
+      await tx.dimBenefitFieldCondition.deleteMany({ where: { id: { in: boundLeaves.map((l) => l.id) } } });
+      await tx.fctDynamicFieldCondition.deleteMany({ where: { id: { in: dynamicFieldConditionIds } } });
+      await tx.fctDynamicRuleGroup.deleteMany({ where: { id: { in: dynamicRuleGroupIds } } });
+    }
+
+    return await tx.dimField.update({ where: { id }, data: { deletedAt: new Date() } });
+  });
 };

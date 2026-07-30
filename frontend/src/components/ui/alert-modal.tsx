@@ -23,6 +23,9 @@ export interface AlertModalProps {
   size?: ModalSize;
   confirmLabel?: string;
   onConfirm?: () => void;
+  /** When set, renders a secondary Cancel button that just closes (no onConfirm) — turns this
+   * info dialog into a confirm dialog (see useAlert's showConfirm). */
+  cancelLabel?: string;
 }
 
 const DEFAULT_TITLES: Record<AlertVariant, string> = {
@@ -36,7 +39,7 @@ const DEFAULT_TITLES: Record<AlertVariant, string> = {
 // Backend responses (ApiEnvelope) always carry a human-readable `message` (success) or
 // `error` (failure) string meant to be shown directly, so this is a thin variant-styled
 // shell around that text rather than another place to author copy.
-export function AlertModal({ open, onOpenChange, variant, title, message, size = "xs", confirmLabel = "Close", onConfirm }: AlertModalProps) {
+export function AlertModal({ open, onOpenChange, variant, title, message, size = "xs", confirmLabel = "Close", onConfirm, cancelLabel }: AlertModalProps) {
   const { icon: Icon, iconClassName, badgeClassName } = VARIANT_CONFIG[variant];
   // A short single-sentence message reads fine centered; a multi-line list (e.g. several
   // validation issues, one per line) reads as a ragged, hard-to-scan center-aligned block —
@@ -50,17 +53,24 @@ export function AlertModal({ open, onOpenChange, variant, title, message, size =
       size={size}
       showCloseButton={false}
       footer={
-        <Button
-          type="button"
-          className="w-full sm:mx-auto sm:w-auto"
-          variant={variant === "error" ? "destructive" : "default"}
-          onClick={() => {
-            onConfirm?.();
-            onOpenChange(false);
-          }}
-        >
-          {confirmLabel}
-        </Button>
+        <div className={cn("flex w-full flex-col gap-2 sm:flex-row sm:justify-center", cancelLabel && "sm:justify-end")}>
+          {cancelLabel && (
+            <Button type="button" variant="outline" className="w-full sm:w-auto" onClick={() => onOpenChange(false)}>
+              {cancelLabel}
+            </Button>
+          )}
+          <Button
+            type="button"
+            className="w-full sm:w-auto"
+            variant={variant === "error" || variant === "warning" ? "destructive" : "default"}
+            onClick={() => {
+              onConfirm?.();
+              onOpenChange(false);
+            }}
+          >
+            {confirmLabel}
+          </Button>
+        </div>
       }
     >
       <div className="flex flex-col items-center gap-3 py-2 text-center">

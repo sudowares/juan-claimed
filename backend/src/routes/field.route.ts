@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getAllFields, getFieldById, createField, updateField, deleteField, reorderFields } from "../controllers/field.controller.js";
+import { getAllFields, getFieldById, createField, updateField, deleteField, reorderFields, getFieldBenefitBindings } from "../controllers/field.controller.js";
 import { getFieldOptionsByFieldId, createFieldOptions, editFieldOptions, deleteFieldOption } from "../controllers/fieldOptions.controller.js";
 import { validateBody } from "../middlewares/validate.middleware.js";
 import { compositeFieldSchema, reorderFieldsSchema } from "../requests/field.request.js";
@@ -37,6 +37,9 @@ fieldRouter.patch(
 );
 
 fieldRouter.get("/:id", mockAuth, requireRole(PERMISSIONS.VIEW_FIELDS), getFieldById);
+
+// Which benefits condition on this field — for the delete confirmation's "bound to benefit" warning.
+fieldRouter.get("/:id/benefit-bindings", mockAuth, requireRole(PERMISSIONS.VIEW_FIELDS), getFieldBenefitBindings);
 
 fieldRouter.post("/", mockAuth, requireRole(PERMISSIONS.CREATE_FIELDS), validateBody(compositeFieldSchema), requireFieldClassificationRole, createField);
 fieldRouter.put("/:id", mockAuth, requireRole(PERMISSIONS.EDIT_FIELDS), validateBody(compositeFieldSchema), requireFieldEditClassificationRole, updateField);

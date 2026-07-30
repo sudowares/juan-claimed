@@ -179,6 +179,12 @@ export async function deleteField(id: string, token: string): Promise<void> {
   await apiFetch<{ id: string }>(`/api/fields/${id}`, { method: "DELETE", token });
 }
 
+// Benefits whose eligibility rule conditions on this field — shown in the delete confirmation
+// so the admin knows deleting it will unbind it from those benefits.
+export async function getFieldBenefitBindings(id: string, token: string): Promise<{ id: string; name: string }[]> {
+  return apiFetch<{ id: string; name: string }[]>(`/api/fields/${id}/benefit-bindings`, { token });
+}
+
 export async function deleteFieldOption(fieldId: string, optionId: string, token: string): Promise<void> {
   await apiFetch<{ id: string }>(`/api/fields/${fieldId}/options/${optionId}`, { method: "DELETE", token });
 }

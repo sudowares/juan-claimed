@@ -1,8 +1,9 @@
 import * as React from "react";
 import { Plus } from "lucide-react";
 import { useAuth } from "@/lib/auth";
-import { getFields, getFieldInputTypes, getFieldConditionOperators, reorderFields } from "@/services/fields.service";
+import { getFields, getFieldInputTypes, getFieldConditionOperators, reorderFields, deleteField, getFieldBenefitBindings } from "@/services/fields.service";
 import { getHierarchies } from "@/services/fieldHierarchy.service";
+import { useAlert } from "@/lib/alert-store";
 import type { DimField, DimFieldConditionOperator, DimFieldHierarchy, DimFieldInputType, FieldClassification } from "@/types/domain";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -11,6 +12,7 @@ import { FieldFormModal } from "@/components/admin/FieldFormModal";
 
 export function FieldsAdminPage() {
   const { token, role } = useAuth();
+  const { showConfirm, showApiError } = useAlert();
   // Global fields are eGovPH-synced/locked and shipped once at seed time — nobody, not even
   // Superadmin, may create a new one anymore (enforced server-side too, see
   // requireFieldClassificationRole.middleware.ts). Reordering the EXISTING Global fields'
@@ -48,6 +50,41 @@ export function FieldsAdminPage() {
   const topLevelFields = React.useMemo(() => (fields ?? []).filter((f) => f.parentFieldId === null), [fields]);
   const globalFields = React.useMemo(() => topLevelFields.filter((f) => f.classification === "GLOBAL"), [topLevelFields]);
   const followUpFields = React.useMemo(() => topLevelFields.filter((f) => f.classification === "FOLLOW_UP"), [topLevelFields]);
+
+  const handleDelete = React.useCallback(
+    async (field: DimField) => {
+      if (!token) return;
+      // Look up which benefits condition on this field so the confirmation can spell out that
+      // deleting it will unbind it from them (falls back to a plain confirm if the lookup fails).
+      let bindings: { id: string; name: string }[] = [];
+      try {
+        bindings = await getFieldBenefitBindings(field.id, token);
+      } catch {
+        bindings = [];
+      }
+
+      const bound = bindings.length > 0;
+      const message = bound
+        ? `This field is bound to benefit: ${bindings.map((b) => b.name).join(", ")}.\n\nAre you sure you want to delete this? Deleting this will unbind it from ${bindings.length === 1 ? "that benefit" : "those benefits"}.`
+        : `Are you sure you want to delete "${field.englishName}"? This can't be undone.`;
+
+      showConfirm({
+        title: "Delete field",
+        message,
+        size: bound ? "sm" : undefined,
+        confirmLabel: "Delete",
+        onConfirm: async () => {
+          try {
+            await deleteField(field.id, token);
+            load();
+          } catch (err) {
+            showApiError(err, "Could not delete the field.");
+          }
+        },
+      });
+    },
+    [token, load, showConfirm, showApiError],
+  );
 
   const openCreate = (classification: FieldClassification) => {
     setEditTarget(null);
@@ -111,6 +148,7 @@ export function FieldsAdminPage() {
             onReorder={(ids) => handleReorder("GLOBAL", ids)}
             onEdit={openEdit}
             onView={openView}
+            onDelete={canReorderGlobal ? handleDelete : undefined}
             canReorder={canReorderGlobal}
           />
         </TabsContent>
@@ -121,6 +159,7 @@ export function FieldsAdminPage() {
             onReorder={(ids) => handleReorder("FOLLOW_UP", ids)}
             onEdit={openEdit}
             onView={openView}
+            onDelete={canCreateFollowUp ? handleDelete : undefined}
             canReorder={canCreateFollowUp}
             emptyAction={canCreateFollowUp ? { label: "Add Field", onClick: () => openCreate("FOLLOW_UP") } : undefined}
           />

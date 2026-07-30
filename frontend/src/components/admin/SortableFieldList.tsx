@@ -2,7 +2,7 @@ import * as React from "react";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Lock, Pencil, Eye, ListChecks, CornerDownRight } from "lucide-react";
+import { GripVertical, Lock, Pencil, Eye, Trash2, ListChecks, CornerDownRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,9 @@ interface SortableFieldListProps {
   /** Opens the same modal read-only. Always available — an eGovField row only ever gets
    * this (no Pencil at all, see FieldRowContent), everything else gets both. */
   onView: (field: DimField) => void;
+  /** Deletes the field (with a bound-to-benefit confirmation). Optional — omit to hide the
+   * delete action. Only shown on editable (non-eGov) rows, same gate as Edit. */
+  onDelete?: (field: DimField) => void;
   canReorder: boolean;
   emptyAction?: { label: string; onClick: () => void };
 }
@@ -32,7 +35,7 @@ interface SortableFieldListProps {
 // Only TOP-LEVEL fields are draggable/sortable — anchored children always render nested
 // immediately under their anchor, in their own anchor-scoped sortOrder, not reorderable
 // among the top-level set (v1; see FieldConditionalChildrenEditor.tsx's plan comment).
-export function SortableFieldList({ fields, onReorder, onEdit, onView, canReorder, emptyAction }: SortableFieldListProps) {
+export function SortableFieldList({ fields, onReorder, onEdit, onView, onDelete, canReorder, emptyAction }: SortableFieldListProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const { topLevel, childrenByAnchor } = React.useMemo(() => groupByAnchor(fields ?? []), [fields]);
@@ -69,14 +72,14 @@ export function SortableFieldList({ fields, onReorder, onEdit, onView, canReorde
             <span className="w-40 px-3">Type</span>
             <span className="w-24 px-3">Required</span>
             <span className="w-28 px-3" />
-            <span className="w-20 px-3" />
+            <span className="w-28 px-3" />
           </div>
 
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
             <SortableContext items={topLevel.map((f) => f.id)} strategy={verticalListSortingStrategy}>
               <div className="divide-y divide-border/70">
                 {topLevel.map((field) => (
-                  <FieldWithChildren key={field.id} field={field} depth={0} childrenByAnchor={childrenByAnchor} onEdit={onEdit} onView={onView} canReorder={canReorder} />
+                  <FieldWithChildren key={field.id} field={field} depth={0} childrenByAnchor={childrenByAnchor} onEdit={onEdit} onView={onView} onDelete={onDelete} canReorder={canReorder} />
                 ))}
               </div>
             </SortableContext>
@@ -93,6 +96,7 @@ function FieldWithChildren({
   childrenByAnchor,
   onEdit,
   onView,
+  onDelete,
   canReorder,
 }: {
   field: DimField;
@@ -100,6 +104,7 @@ function FieldWithChildren({
   childrenByAnchor: Map<string, DimField[]>;
   onEdit: (field: DimField) => void;
   onView: (field: DimField) => void;
+  onDelete?: (field: DimField) => void;
   canReorder: boolean;
 }) {
   const children = childrenByAnchor.get(field.id) ?? [];
@@ -107,12 +112,12 @@ function FieldWithChildren({
   return (
     <>
       {depth === 0 ? (
-        <SortableFieldRow field={field} onEdit={onEdit} onView={onView} canReorder={canReorder} />
+        <SortableFieldRow field={field} onEdit={onEdit} onView={onView} onDelete={onDelete} canReorder={canReorder} />
       ) : (
-        <AnchoredChildRow field={field} depth={depth} onEdit={onEdit} onView={onView} canEdit={canReorder} />
+        <AnchoredChildRow field={field} depth={depth} onEdit={onEdit} onView={onView} onDelete={onDelete} canEdit={canReorder} />
       )}
       {children.map((child) => (
-        <FieldWithChildren key={child.id} field={child} depth={depth + 1} childrenByAnchor={childrenByAnchor} onEdit={onEdit} onView={onView} canReorder={canReorder} />
+        <FieldWithChildren key={child.id} field={child} depth={depth + 1} childrenByAnchor={childrenByAnchor} onEdit={onEdit} onView={onView} onDelete={onDelete} canReorder={canReorder} />
       ))}
     </>
   );
@@ -122,11 +127,13 @@ function SortableFieldRow({
   field,
   onEdit,
   onView,
+  onDelete,
   canReorder,
 }: {
   field: DimField;
   onEdit: (field: DimField) => void;
   onView: (field: DimField) => void;
+  onDelete?: (field: DimField) => void;
   canReorder: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: field.id, disabled: !canReorder });
@@ -144,7 +151,7 @@ function SortableFieldRow({
         </button>
       )}
       {!canReorder && <span className="w-8 shrink-0" />}
-      <FieldRowContent field={field} onEdit={onEdit} onView={onView} canEdit={canReorder} />
+      <FieldRowContent field={field} onEdit={onEdit} onView={onView} onDelete={onDelete} canEdit={canReorder} />
     </div>
   );
 }
@@ -156,12 +163,14 @@ function AnchoredChildRow({
   depth,
   onEdit,
   onView,
+  onDelete,
   canEdit,
 }: {
   field: DimField;
   depth: number;
   onEdit: (field: DimField) => void;
   onView: (field: DimField) => void;
+  onDelete?: (field: DimField) => void;
   canEdit: boolean;
 }) {
   return (
@@ -169,7 +178,7 @@ function AnchoredChildRow({
       <span className="flex w-8 shrink-0 items-center justify-center text-muted-foreground" style={{ paddingLeft: `${(depth - 1) * 16}px` }}>
         <CornerDownRight className="size-3.5" />
       </span>
-      <FieldRowContent field={field} onEdit={onEdit} onView={onView} canEdit={canEdit} />
+      <FieldRowContent field={field} onEdit={onEdit} onView={onView} onDelete={onDelete} canEdit={canEdit} />
     </div>
   );
 }
@@ -178,11 +187,13 @@ function FieldRowContent({
   field,
   onEdit,
   onView,
+  onDelete,
   canEdit,
 }: {
   field: DimField;
   onEdit: (field: DimField) => void;
   onView: (field: DimField) => void;
+  onDelete?: (field: DimField) => void;
   canEdit: boolean;
 }) {
   // eGovField can't be edited here at all (frontend-only lock, see FieldFormModal's
@@ -215,7 +226,7 @@ function FieldRowContent({
         )}
       </div>
 
-      <div className="flex w-20 justify-end gap-1 px-3 text-right">
+      <div className="flex w-28 justify-end gap-1 px-3 text-right">
         {canActuallyEdit && (
           <Button size="icon" variant="ghost" className="size-8" onClick={() => onEdit(field)} title="Edit">
             <Pencil className="size-4" />
@@ -224,6 +235,11 @@ function FieldRowContent({
         <Button size="icon" variant="ghost" className="size-8" onClick={() => onView(field)} title="View">
           <Eye className="size-4" />
         </Button>
+        {onDelete && canActuallyEdit && (
+          <Button size="icon" variant="ghost" className="size-8 text-muted-foreground hover:text-destructive" onClick={() => onDelete(field)} title="Delete">
+            <Trash2 className="size-4" />
+          </Button>
+        )}
       </div>
     </>
   );

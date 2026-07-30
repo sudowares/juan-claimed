@@ -160,6 +160,24 @@ const mapCompositeFieldError = (res: Response, error: any, action: "create" | "u
   return null;
 };
 
+// GET FIELD BENEFIT BINDINGS — which benefits' eligibility rules condition on this field.
+// Powers the "this is bound to benefit: ... — deleting will unbind it" confirmation.
+export const getFieldBenefitBindings = async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const benefits = await fieldService.getFieldBenefitBindings(req.params.id);
+    return res.status(200).json({ success: true, message: "OK", error: null, errorCode: null, data: benefits });
+  } catch (error: any) {
+    console.error("[FieldController] Error fetching field benefit bindings:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Could not fetch benefit bindings.",
+      error: "An unexpected error occurred on the server.",
+      errorCode: "SERVER_ERROR",
+      data: null,
+    });
+  }
+};
+
 // CREATE FIELD (composite: field + options + dynamic condition tree + inline hierarchy)
 export const createField = async (req: CreateFieldRequest, res: Response) => {
   try {
