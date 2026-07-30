@@ -49,8 +49,12 @@ const validateBenefitInput = (data: any, user: any) => {
 
   const { groupIds, creatorGroupId } = resolveGroupPlan(user, data.groupIds || []);
 
-  if (isNationalLevel && groupIds.length === 0) {
-    throw new Error("INVALID_INPUT: National users must assign at least one group.");
+  // Owning group(s) matter only for a NATIONWIDE benefit (which agency owns it) — a localized
+  // benefit is scoped by psgcCodes instead, so a national-level user (e.g. SUPERADMIN) creating
+  // one needs no group. Previously keyed off isNationalLevel, which wrongly demanded a group even
+  // when Nationwide was off.
+  if (isNationwide && groupIds.length === 0) {
+    throw new Error("INVALID_INPUT: Nationwide benefits must assign at least one group.");
   }
 
   return { isNationwide, incomingCodes, groupIds, creatorGroupId };

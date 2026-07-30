@@ -54,7 +54,9 @@ export function formatConditionValue(
     return { en: `${v.from ?? "?"} – ${v.to ?? "?"}`, tl: `${v.from ?? "?"} – ${v.to ?? "?"}` };
   }
 
-  if (op === "AGE_GREATER_THAN_EQUAL" || op === "AGE_LESS_THAN_EQUAL") {
+  // Every single-value AGE operator's target is { value, unit } (AGE_BETWEEN handled below) —
+  // mirrors ConditionValueInput's AGE_SINGLE_VALUE_OPERATORS.
+  if (op === "AGE_GREATER_THAN" || op === "AGE_LESS_THAN" || op === "AGE_GREATER_THAN_EQUAL" || op === "AGE_LESS_THAN_EQUAL" || op === "AGE_EQUALS" || op === "AGE_NOT_EQUALS") {
     const v = value as { value?: number; unit?: string };
     return { en: `${v.value ?? "?"} ${v.unit ?? ""}`, tl: `${v.value ?? "?"} ${v.unit ?? ""}` };
   }

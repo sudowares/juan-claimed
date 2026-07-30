@@ -62,6 +62,9 @@ interface ConditionValueInputProps {
 
 const DURATION_UNIT_OPTIONS = ["days", "weeks", "months", "years"].map((u) => ({ value: u, label: u }));
 const AGE_UNIT_OPTIONS = ["days", "months", "years"].map((u) => ({ value: u, label: u }));
+// Every single-value AGE operator takes a { value, unit } target (backend condition.util.ts's
+// evaluateAge -> toAgeTarget), NOT a date — AGE_BETWEEN ({ min, max, unit }) is handled on its own.
+const AGE_SINGLE_VALUE_OPERATORS = new Set(["AGE_GREATER_THAN", "AGE_LESS_THAN", "AGE_GREATER_THAN_EQUAL", "AGE_LESS_THAN_EQUAL", "AGE_EQUALS", "AGE_NOT_EQUALS"]);
 const BOOLEAN_OPTIONS = [
   { value: "true", label: "Yes" },
   { value: "false", label: "No" },
@@ -149,7 +152,7 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
     );
   }
 
-  if (op === "AGE_GREATER_THAN_EQUAL" || op === "AGE_LESS_THAN_EQUAL") {
+  if (AGE_SINGLE_VALUE_OPERATORS.has(op)) {
     const v = (value as { value?: number; unit?: string }) ?? {};
     return (
       <div className="flex items-center gap-2">
