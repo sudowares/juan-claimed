@@ -7,6 +7,7 @@ import { MultiSearchableSelect } from "@/components/ui/searchable-select";
 import { HierarchyMultiLevelSelector } from "@/components/fields/HierarchyMultiLevelSelector";
 import { fetchPsgcHierarchyLevel, PSGC_LEVEL_LABELS } from "@/components/fields/ConditionValueInput";
 import { resolvePsgcCodeName } from "@/services/psgc.service";
+import { cn } from "@/lib/utils";
 import type { JurisdictionPrefixEntry } from "@/lib/agentJurisdiction";
 import type { UserGroup } from "@/services/users.service";
 
@@ -36,6 +37,11 @@ interface BenefitScopeFieldsProps {
   /** True for a NATIONAL-scope agent only — Owning Group(s) is pinned to their own group,
    * shown as a static badge instead of the multi-select. */
   groupsLocked?: boolean;
+  /** View-only (the details drawer): hide the interactive location picker entirely and show
+   * only the resolved name badges. The picker is uncontrolled and never reconstructs a saved
+   * selection, so read-only it would just render an empty control plus raw-code chips for the
+   * deep picks its base level never fetched — confusing and wrong. */
+  readOnly?: boolean;
 }
 
 // Replaces the old mock era's free-text `scopeName` field with the real backend model:
@@ -60,6 +66,7 @@ export function BenefitScopeFields({
   jurisdictionPrefix,
   nationwideLocked,
   groupsLocked,
+  readOnly,
 }: BenefitScopeFieldsProps) {
   // Frozen snapshot of everything that existed BEFORE this picker instance started
   // contributing — updated only by removeCode (an external change), never by the picker's
@@ -133,12 +140,16 @@ export function BenefitScopeFields({
       ) : (
         <div className="space-y-2">
           <Label className="text-xs font-semibold text-foreground">Location(s)</Label>
-          <p className="text-xs text-muted-foreground">
-            Pick any number of branches — each can stop at whatever level applies (a whole city, or one specific barangay under it).
-          </p>
+          {!readOnly && (
+            <p className="text-xs text-muted-foreground">
+              Pick any number of branches — each can stop at whatever level applies (a whole city, or one specific barangay under it).
+            </p>
+          )}
+
+          {readOnly && psgcCodes.length === 0 && <p className="text-xs text-muted-foreground italic">No locations set.</p>}
 
           {psgcCodes.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-7">
+            <div className={cn("flex flex-wrap gap-2", !readOnly && "mb-7")}>
               {psgcCodes.map((code) => {
                 // Codes from BEFORE this picker session (baseRef) have no representation in
                 // the live picker below — this badge's X is the only way to remove them.
@@ -170,13 +181,15 @@ export function BenefitScopeFields({
             </div>
           )}
 
-          <HierarchyMultiLevelSelector
-            fetchLevel={fetchPsgcHierarchyLevel}
-            value={psgcCodes}
-            onChange={handlePickerChange}
-            lockedPrefix={jurisdictionPrefix}
-            levelLabels={PSGC_LEVEL_LABELS}
-          />
+          {!readOnly && (
+            <HierarchyMultiLevelSelector
+              fetchLevel={fetchPsgcHierarchyLevel}
+              value={psgcCodes}
+              onChange={handlePickerChange}
+              lockedPrefix={jurisdictionPrefix}
+              levelLabels={PSGC_LEVEL_LABELS}
+            />
+          )}
         </div>
       )}
     </div>

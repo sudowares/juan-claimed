@@ -18,6 +18,7 @@ import { getFields, getFieldConditionOperators } from "@/services/fields.service
 import { getHierarchies } from "@/services/fieldHierarchy.service";
 import { getGroups, type UserGroup } from "@/services/users.service";
 import { getScopes, type Scope } from "@/services/scopes.service";
+import { resolvePsgcCodeName } from "@/services/psgc.service";
 import { resolveAgentJurisdictionPrefix, type JurisdictionPrefixEntry } from "@/lib/agentJurisdiction";
 import type { DimField, DimFieldConditionOperator, DimFieldHierarchy, FctBenefit, RuleTreeNode, RuleTreeRoot } from "@/types/domain";
 import { Button } from "@/components/ui/button";
@@ -130,7 +131,10 @@ export function BenefitFormModal({ open, onOpenChange, benefit, viewOnly, onSave
       setTagalogDescription(benefit.tagalogDescription);
       setIsNationwide(benefit.isNationwide);
       setPsgcCodes(benefit.benefitPsgcCodes.map((pc) => pc.psgcCode));
-      setPsgcLocationNames(Object.fromEntries(benefit.benefitPsgcCodes.map((pc) => [pc.psgcCode, pc.locationName ?? pc.psgcCode])));
+      // Only seed names the row actually carries — never `?? pc.psgcCode`, which would store the
+      // CODE as its own "name" and (being truthy) block the client-side resolver below from ever
+      // filling in the real name. Codes without a name stay absent here and get resolved next.
+      setPsgcLocationNames(Object.fromEntries(benefit.benefitPsgcCodes.filter((pc) => pc.locationName).map((pc) => [pc.psgcCode, pc.locationName as string])));
       setGroupIds(benefit.benefitGroups.map((g) => g.groupId));
 
       // Requirements/utilizations/how-to-applies here come from getBenefits (the admin list
@@ -201,6 +205,22 @@ export function BenefitFormModal({ open, onOpenChange, benefit, viewOnly, onSave
       originalStrippedTreeRef.current = JSON.stringify(stripTreeIds(loadedTree));
     });
   }, [open, benefit, token]);
+
+  // Any scope code that arrived without a name (older data, or getPsgcLocation missed it
+  // server-side) gets resolved client-side so the view drawer's Scope/Eligibility badges show
+  // names, not raw codes — matches what the table's formatBenefitScope shows. resolvePsgcCodeName
+  // is in-memory cached, so this is cheap and idempotent.
+  React.useEffect(() => {
+    if (!open) return;
+    psgcCodes
+      .filter((code) => !psgcLocationNames[code])
+      .forEach((code) => {
+        resolvePsgcCodeName(code).then((name) => {
+          if (name) setPsgcLocationNames((prev) => (prev[code] ? prev : { ...prev, [code]: name }));
+        });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, psgcCodes]);
 
   // notConditional fields excluded at the query level — a benefit's eligibility tree must
   // never be able to target one (see field.service.ts's fetchAllFields conditionable param).
@@ -437,6 +457,7 @@ export function BenefitFormModal({ open, onOpenChange, benefit, viewOnly, onSave
               jurisdictionPrefix={jurisdictionPrefix}
               nationwideLocked={isNationalAgent || isScopedAgent}
               groupsLocked={isNationalAgent}
+              readOnly={viewOnly}
             />
           </TabsContent>
 
