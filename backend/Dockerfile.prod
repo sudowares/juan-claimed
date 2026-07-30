@@ -17,6 +17,7 @@ COPY . .
 RUN npx prisma generate
 
 # Compile TS -> dist/ (tsc, outDir=dist). dist/generated/prisma comes along for the ride.
+ENV NODE_OPTIONS="--max-old-space-size=1536"
 RUN npm run build
 
 EXPOSE 4000
