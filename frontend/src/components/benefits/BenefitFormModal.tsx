@@ -307,12 +307,21 @@ export function BenefitFormModal({ open, onOpenChange, benefit, viewOnly, onSave
         ? JSON.stringify(strippedTree) !== originalStrippedTreeRef.current
         : eligibilityTree.children.length > 0;
 
+      // A scoped agent who picks nothing below their locked jurisdiction means "the whole of
+      // my jurisdiction" — but the locked prefix is never part of the picker's emitted value
+      // (see HierarchyMultiLevelSelector), so psgcCodes is empty. Default it to the deepest
+      // locked leaf (their own jurisdiction code) so the benefit scopes there instead of
+      // failing "psgcCodes must contain at least one code". An unlocked author (no prefix,
+      // e.g. SUPERADMIN) still must pick at least one location — nothing to default to.
+      const effectivePsgcCodes =
+        psgcCodes.length > 0 ? psgcCodes : jurisdictionPrefix.length > 0 ? [jurisdictionPrefix[jurisdictionPrefix.length - 1].value] : [];
+
       const payload: BenefitBundleInput = {
         name,
         englishDescription,
         tagalogDescription,
         nationwide: isNationwide,
-        psgcCodes: isNationwide ? [] : psgcCodes,
+        psgcCodes: isNationwide ? [] : effectivePsgcCodes,
         groupIds: isNationwide ? groupIds : [],
         requirements: stripBenefitItems(requirements),
         utilizations: stripBenefitItems(utilizations),

@@ -69,8 +69,15 @@ export const isBenefitVisibleToScope = (
   if (user.scope?.value === "NATIONAL" || user.scope?.value === "SUPERADMIN") return true;
   if (!user.psgcCode) return false;
 
+  // Visible if the benefit's location is anywhere on the SAME ancestral line as the agent's
+  // own jurisdiction — i.e. one contains the other (derivePsgcAncestorPath includes the node
+  // itself, so "equal" satisfies both clauses):
+  // - benefit at the agent's level or ABOVE it (Region/Province/... that cover them; National
+  //   is handled by isNationwide above) -> the benefit's code is in the AGENT's ancestry.
+  // - benefit BELOW the agent (a city/barangay within their jurisdiction they scoped a benefit
+  //   to) -> the AGENT's code is in the BENEFIT's ancestry.
   const ownAncestry = new Set(derivePsgcAncestorPath(user.psgcCode));
-  return benefit.benefitPsgcCodes.some((pc) => ownAncestry.has(pc.psgcCode));
+  return benefit.benefitPsgcCodes.some((pc) => ownAncestry.has(pc.psgcCode) || derivePsgcAncestorPath(pc.psgcCode).includes(user.psgcCode));
 };
 
 export const getScopeIdMap = async (db: Db = prisma): Promise<Map<string, string>> => {

@@ -87,8 +87,24 @@ export const listBenefits = async (scopeFilterUser?: { scope?: { value: string }
     orderBy: { createdAt: "desc" },
   });
 
-  if (!scopeFilterUser) return benefits;
-  return benefits.filter((b) => isBenefitVisibleToScope(b, scopeFilterUser));
+  const visible = scopeFilterUser ? benefits.filter((b) => isBenefitVisibleToScope(b, scopeFilterUser)) : benefits;
+
+  // Attach each code's human location name so the admin table's Scope column shows names, not
+  // raw PSGC codes (formatBenefitScope already prefers locationName). Resolve each UNIQUE code
+  // once — getPsgcLocation is memoized, so this is cheap after the first warm-up.
+  const uniqueCodes = [...new Set(visible.flatMap((b) => b.benefitPsgcCodes.map((pc) => pc.psgcCode)))];
+  const locationNameMap = new Map(
+    (
+      await Promise.all(
+        uniqueCodes.map(async (code) => {
+          const location = await getPsgcLocation(code);
+          return [code, location?.name ?? null] as const;
+        }),
+      )
+    ).filter((entry): entry is [string, string] => entry[1] !== null),
+  );
+
+  return visible.map((b) => enrichBenefitPsgcCodes(b, locationNameMap));
 };
 
 // FctAttachment isn't a direct Prisma relation on Requirement/Utilization/HowToApply (it's

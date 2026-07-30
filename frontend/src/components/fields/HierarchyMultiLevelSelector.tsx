@@ -73,12 +73,21 @@ export function HierarchyMultiLevelSelector({ fetchLevel, onChange, disabled, lo
     setLevels([{ groups: [], selected: [], loading: true }]);
     fetchLevel(rootParent, baseDepth).then((options) => {
       if (mountedRequestRef.current !== requestId) return;
-      setLevels([{ groups: options.length > 0 ? [{ parentValue: "", parentLabel: "", options }] : [], selected: [], loading: false }]);
+      // No options at the base level (e.g. a fully barangay-locked agent — nothing left to
+      // pick below the locked chain) => no interactive level at all, rather than a stray
+      // empty "No options" row.
+      setLevels(options.length > 0 ? [{ groups: [{ parentValue: "", parentLabel: "", options }], selected: [], loading: false }] : []);
     });
-    // Intentionally mount-only — this control is write-only beyond its initial fetch (see
-    // the uncontrolled note above), so it doesn't refetch when the parent re-renders.
+    // Re-run only when the locked-prefix chain actually changes (rootParent/baseDepth are
+    // primitives, so an unrelated parent re-render doesn't refetch — the "write-only beyond
+    // initial fetch" intent holds). The refetch matters because lockedPrefix arrives
+    // ASYNC (resolveAgentJurisdictionPrefix): at first paint it's empty, so a mount-only
+    // fetch would grab the ROOT level (regions) and then never correct itself once the
+    // jurisdiction resolves and the real base depth (e.g. City under a locked Region/Province)
+    // is known. fetchLevel is intentionally NOT a dep — a static-hierarchy fetcher is a fresh
+    // closure each render and would refetch forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [rootParent, baseDepth]);
 
   const emitChange = (updatedLevels: LevelState[]) => {
     // A selected node at depth D is terminal unless one of its own children is selected at
@@ -116,7 +125,10 @@ export function HierarchyMultiLevelSelector({ fetchLevel, onChange, disabled, lo
     }
     setLevels((prev) => {
       const next = prev.slice(0, depth + 1);
-      next.push({ groups, selected: [], loading: false });
+      // Only add the child level if the selected node(s) actually have children. A terminal
+      // pick (e.g. a barangay — the deepest PSGC level) fetches nothing, so appending here
+      // would leave a stray empty "Level N" row with no options below the leaf.
+      if (groups.length > 0) next.push({ groups, selected: [], loading: false });
       return next;
     });
   };
