@@ -73,6 +73,8 @@ services:
         # CORS, no hardcoded IP.
         VITE_API_BASE_URL: ""
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+        # Baked into the bundle at build time — must be rebuilt to change (runtime .env can't).
+        VITE_UNLOCK_GOOGLE_SYNCED_FIELDS: ${UNLOCK_GOOGLE_SYNCED_FIELDS}
     restart: unless-stopped
     # Bound to localhost — host nginx proxies to this. Container nginx serves the static
     # dist on port 80 inside the container; host side uses 8083 (free on this VPS).

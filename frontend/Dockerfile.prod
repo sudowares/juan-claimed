@@ -17,8 +17,12 @@ COPY . .
 # passed here as a build arg, promoted to an env var Vite can read. Change it per deployment.
 ARG VITE_API_BASE_URL
 ARG VITE_GOOGLE_CLIENT_ID
+# "true" unlocks eGovField fields for a Google-only session (see lib/egov-field-lock.ts).
+# Build-time only — a runtime .env value can't change it once the bundle is baked.
+ARG VITE_UNLOCK_GOOGLE_SYNCED_FIELDS
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+ENV VITE_UNLOCK_GOOGLE_SYNCED_FIELDS=$VITE_UNLOCK_GOOGLE_SYNCED_FIELDS
 
 RUN npm run build
 

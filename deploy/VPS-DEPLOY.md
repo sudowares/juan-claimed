@@ -32,6 +32,7 @@ docker build --platform linux/amd64 --provenance=false \
 docker build --platform linux/amd64 --provenance=false \
   --build-arg VITE_API_BASE_URL="" \
   --build-arg VITE_GOOGLE_CLIENT_ID="<GOOGLE_CLIENT_ID from .env>" \
+  --build-arg VITE_UNLOCK_GOOGLE_SYNCED_FIELDS="true" \
   -f frontend/Dockerfile.prod -t juan-claimed-frontend:latest ./frontend
 
 docker save juan-claimed-backend:latest  | gzip > backend-prod.tar.gz
@@ -46,6 +47,10 @@ would build, so `up -d` (no `--build`) reuses them and the VPS never compiles.
   (e.g. `apiFetch("/api/scopes")`), so the base must be just the origin; host nginx routes
   `/api/*` to the backend. No CORS, no hardcoded IP.
 - `VITE_GOOGLE_CLIENT_ID` is baked into the JS at build time — rebuild to change it.
+- `VITE_UNLOCK_GOOGLE_SYNCED_FIELDS="true"` unlocks eGovField fields for Google-only sessions
+  (see `lib/egov-field-lock.ts`). Also **build-time** — the backend `.env`'s
+  `UNLOCK_GOOGLE_SYNCED_FIELDS` only affects the backend container; the frontend needs this
+  build-arg or the fields stay locked no matter what the runtime `.env` says.
 
 ### Load + run (on the VPS)
 
