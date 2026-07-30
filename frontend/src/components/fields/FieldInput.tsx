@@ -8,7 +8,7 @@ import { getHierarchies } from "@/services/fieldHierarchy.service";
 import { textError, numberError, moneyError, dateError, dateNativeBounds, multiSelectError } from "@/lib/fieldValidation";
 import type { DimField, DimFieldHierarchy, DimFieldOption } from "@/types/domain";
 import { Badge } from "@/components/ui/badge";
-import { TextField, TextareaField, SelectField, MultiSelectField, DurationField, HierarchySelectField, type DurationValue } from "@/components/ui/text-field";
+import { TextField, TextareaField, SelectField, MultiSelectField, DurationField, HierarchySelectField, DEFAULT_DURATION_UNITS, type DurationValue } from "@/components/ui/text-field";
 import { ResidencePsgcField, type PsgcAddressValue } from "@/components/fields/PsgcPhLocationHierarchyField";
 
 const PH_LOCATION_HIERARCHY_KEY = "PH_LOCATION";
@@ -232,18 +232,26 @@ export function FieldInput({ field, value, onChange }: FieldInputProps) {
       );
     }
 
-    case "DURATION":
+    case "DURATION": {
+      // Restrict the unit dropdown to the field's configured allowedUnits (FieldConfigForm) —
+      // e.g. a field set to "months only" shouldn't offer days/weeks/years. Empty/absent =>
+      // all units (DurationField's own default).
+      const allowedUnits = field.configJson?.allowedUnits as string[] | undefined;
+      const units =
+        Array.isArray(allowedUnits) && allowedUnits.length > 0 ? DEFAULT_DURATION_UNITS.filter((u) => allowedUnits.includes(u.value)) : undefined;
       return (
         <DurationField
           label={field.englishName}
           sublabel={field.tagalogName}
           value={value as DurationValue | undefined}
           onChange={onChange as (v: DurationValue) => void}
+          units={units}
           required={required}
           disabled={disabled}
           badge={badge}
         />
       );
+    }
 
     case "REPEATER_GROUP":
       return null; // rendered by RepeaterGroupInput (see FieldForm), not directly here

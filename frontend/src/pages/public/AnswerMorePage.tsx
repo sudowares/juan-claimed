@@ -36,18 +36,20 @@ export function AnswerMorePage() {
         const fieldIds = new Set(pending.flatMap((r) => r.pendingFieldIds));
         const allFields = await getFields(token ?? undefined);
 
-        // A GLOBAL field with NO answer row at all — the field key itself is absent from
-        // userAnswers — genuinely was never presented, unlike one that HAS a row (even a
-        // null one, meaning it was asked and deliberately left blank since it's optional).
-        // Surfaced here too, even though pendingFieldIds (benefit-condition-driven) may not
-        // reference it yet: skipping the base quiz shouldn't silently keep a global field
-        // out of "Answer More" forever just because no benefit's tree happens to check it.
-        // REPEATER_GROUP fields are excluded — they have no scalar row to check "answered"
-        // against at all (their data lives in FctUserFieldAnswerGroup, not this array), and
-        // this form's submit path already can't handle them (see handleSubmit's filter).
+        // Any top-level field with NO answer row at all — the field key itself is absent from
+        // userAnswers — genuinely was never presented, unlike one that HAS a row (even a null
+        // one, meaning it was asked and deliberately left blank since it's optional). Surfaced
+        // here regardless of classification, even though pendingFieldIds (benefit-condition-
+        // driven) may not reference it: a FOLLOW-UP field that no benefit's tree happens to
+        // check would otherwise never appear in "Answer More" even once its parent condition is
+        // met. Visibility still filters — FieldForm's renderableFields hides any whose
+        // dynamicCondition isn't satisfied by the current draft, so gated follow-ups only
+        // appear once their parent is actually answered the right way. REPEATER_GROUP fields
+        // are excluded — they have no scalar row to check "answered" against (their data lives
+        // in FctUserFieldAnswerGroup), and this form's submit path can't handle them either.
         const answeredFieldIds = new Set(answers.filter((a) => a.repeaterGroupId === null).map((a) => a.fieldId));
         allFields
-          .filter((f) => f.classification === "GLOBAL" && f.parentFieldId === null && f.fieldInputType.value !== "REPEATER_GROUP" && !answeredFieldIds.has(f.id))
+          .filter((f) => f.parentFieldId === null && f.fieldInputType.value !== "REPEATER_GROUP" && !answeredFieldIds.has(f.id))
           .forEach((f) => fieldIds.add(f.id));
 
         setPendingFields(allFields.filter((f) => fieldIds.has(f.id)).sort((a, b) => a.sortOrder - b.sortOrder));
