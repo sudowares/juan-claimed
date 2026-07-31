@@ -20,6 +20,12 @@ export interface BenefitEligibilityResult {
    * applicant is never asked to answer more questions for a benefit they're already
    * disqualified from, or already qualify for through a different branch). */
   pendingFieldIds: string[];
+  /** EVERY field this benefit's eligibility tree references that the applicant has no answer
+   * row for yet — NOT short-circuited (unlike pendingFieldIds). "Answer More" uses this so an
+   * applicant can fill in every benefit-relevant field at once, not just the one next question
+   * a pruned AND/OR branch happens to still need. A field with a (even null) answer row counts
+   * as answered, so it's excluded. Empty when there's no tree (residency-only benefit). */
+  unansweredFieldIds: string[];
 }
 
 const PH_LOCATION_HIERARCHY_KEY = "PH_LOCATION";
@@ -39,6 +45,13 @@ interface NodeResult {
   status: EligibilityStatus;
   pendingFieldIds: string[];
 }
+
+// Every referenced field the applicant has no answer row for (never presented) — the
+// un-short-circuited counterpart to pendingFieldIds, for "Answer More". A field with any row
+// (even null value) has a key here and is treated as answered/seen. Mirrors evaluateLeafNode's
+// hasOwnProperty test.
+const unansweredOf = (fieldIds: Set<string>, answers: Record<string, unknown>): string[] =>
+  [...fieldIds].filter((fieldId) => !Object.prototype.hasOwnProperty.call(answers, fieldId));
 
 const PENDING = (fieldId: string): NodeResult => ({ status: "PENDING", pendingFieldIds: [fieldId] });
 const MATCHED: NodeResult = { status: "MATCHED", pendingFieldIds: [] };
@@ -225,7 +238,7 @@ export const evaluateBenefitEligibilityWith = async (
   // No eligibility tree authored at all — an "optional" tree per BenefitFormModal — means
   // there's nothing further to check beyond residency.
   if (!tree) {
-    return { benefitId: benefit.id, ...residency };
+    return { benefitId: benefit.id, ...residency, unansweredFieldIds: [] };
   }
 
   const fieldIds = new Set<string>();
@@ -251,7 +264,7 @@ export const evaluateBenefitEligibilityWith = async (
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers) };
 };
 
 export const evaluateBenefitEligibility = async (benefit: BenefitForEligibility, userId: string): Promise<BenefitEligibilityResult> => {
@@ -308,7 +321,7 @@ export const evaluateBenefitEligibilityDetailById = async (benefitId: string, us
 
   if (!tree) {
     const combined = combine("ALL", [residency]);
-    return { benefitId: benefit.id, ...combined, leaves };
+    return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: [] };
   }
 
   const fieldIds = new Set<string>();
@@ -339,7 +352,7 @@ export const evaluateBenefitEligibilityDetailById = async (benefitId: string, us
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers) };
 };
 
 // --- Guest evaluation ("public/no account" flow) ---------------------------------------
@@ -405,7 +418,7 @@ async function evaluateBenefitEligibilityForAnswersWith(
   const residency = await evaluateResidency(db, benefit, baseAnswers);
 
   if (!tree) {
-    return { benefitId: benefit.id, ...residency };
+    return { benefitId: benefit.id, ...residency, unansweredFieldIds: [] };
   }
 
   const fieldIds = new Set<string>();
@@ -424,7 +437,7 @@ async function evaluateBenefitEligibilityForAnswersWith(
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers) };
 }
 
 export const evaluateAllBenefitsEligibilityForAnswers = async (source: GuestAnswerSource): Promise<BenefitEligibilityResult[]> => {
@@ -454,7 +467,7 @@ export const evaluateBenefitEligibilityDetailForAnswers = async (benefitId: stri
 
   if (!tree) {
     const combined = combine("ALL", [residency]);
-    return { benefitId: benefit.id, ...combined, leaves };
+    return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: [] };
   }
 
   const fieldIds = new Set<string>();
@@ -480,5 +493,5 @@ export const evaluateBenefitEligibilityDetailForAnswers = async (benefitId: stri
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers) };
 };

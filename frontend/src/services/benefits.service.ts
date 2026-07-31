@@ -32,6 +32,9 @@ export interface EligibilityResult {
    * this is exactly what to prompt for next (never a moot follow-up for an already-decided
    * benefit). */
   pendingFieldIds: string[];
+  /** Every referenced field with no answer row yet — NOT short-circuited. "Answer More" uses
+   * this (unioned across PENDING benefits) to surface every unanswered benefit-relevant field. */
+  unansweredFieldIds: string[];
 }
 
 // Real, server-evaluated eligibility (benefitEligibility.service.ts) against the user's
@@ -50,7 +53,7 @@ export async function getEligibilityResults(token?: string, guestPayload?: Guest
   const byBenefitId = new Map(eligibility.map((e) => [e.benefitId, e]));
   return benefits.map((benefit) => {
     const result = byBenefitId.get(benefit.id);
-    return { benefit, status: result?.status ?? "PENDING", pendingFieldIds: result?.pendingFieldIds ?? [] };
+    return { benefit, status: result?.status ?? "PENDING", pendingFieldIds: result?.pendingFieldIds ?? [], unansweredFieldIds: result?.unansweredFieldIds ?? [] };
   });
 }
 

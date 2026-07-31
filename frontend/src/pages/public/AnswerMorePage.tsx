@@ -21,7 +21,7 @@ export function AnswerMorePage() {
   const navigate = useNavigate();
   const { token, role, user } = useAuth();
   const { showApiError } = useAlert();
-  const { answers, answersMap, repeaterRowsMap, isGuest, submit } = useAnswers();
+  const { answersMap, repeaterRowsMap, isGuest, submit } = useAnswers();
   const [pendingFields, setPendingFields] = React.useState<DimField[] | null>(null);
   const [pendingBenefitNames, setPendingBenefitNames] = React.useState<string[]>([]);
   const [draft, setDraft] = React.useState<Record<string, unknown>>({});
@@ -33,24 +33,15 @@ export function AnswerMorePage() {
     getEligibilityResults(token ?? undefined, isGuest ? { answers: answersMap, repeaterRows: repeaterRowsMap } : undefined).then(
       async (results) => {
         const pending = results.filter((r) => r.status === "PENDING");
-        const fieldIds = new Set(pending.flatMap((r) => r.pendingFieldIds));
+        // A follow-up resurfaces ONLY if a benefit is still a candidate for this user (PENDING)
+        // and hasn't been invalidated (NOT_ELIGIBLE) — those contribute nothing here. Within
+        // each candidate benefit, use unansweredFieldIds (NOT short-circuited) so EVERY unanswered
+        // benefit-relevant field appears, not just the one next question a pruned AND/OR branch
+        // still needs. FieldForm's renderableFields still applies visibility, so a gated follow-up
+        // only shows once its parent is answered; REPEATER_GROUP is never referenced as a scalar
+        // condition field, so nothing repeater-shaped leaks in.
+        const fieldIds = new Set(pending.flatMap((r) => r.unansweredFieldIds));
         const allFields = await getFields(token ?? undefined);
-
-        // Any top-level field with NO answer row at all — the field key itself is absent from
-        // userAnswers — genuinely was never presented, unlike one that HAS a row (even a null
-        // one, meaning it was asked and deliberately left blank since it's optional). Surfaced
-        // here regardless of classification, even though pendingFieldIds (benefit-condition-
-        // driven) may not reference it: a FOLLOW-UP field that no benefit's tree happens to
-        // check would otherwise never appear in "Answer More" even once its parent condition is
-        // met. Visibility still filters — FieldForm's renderableFields hides any whose
-        // dynamicCondition isn't satisfied by the current draft, so gated follow-ups only
-        // appear once their parent is actually answered the right way. REPEATER_GROUP fields
-        // are excluded — they have no scalar row to check "answered" against (their data lives
-        // in FctUserFieldAnswerGroup), and this form's submit path can't handle them either.
-        const answeredFieldIds = new Set(answers.filter((a) => a.repeaterGroupId === null).map((a) => a.fieldId));
-        allFields
-          .filter((f) => f.parentFieldId === null && f.fieldInputType.value !== "REPEATER_GROUP" && !answeredFieldIds.has(f.id))
-          .forEach((f) => fieldIds.add(f.id));
 
         setPendingFields(allFields.filter((f) => fieldIds.has(f.id)).sort((a, b) => a.sortOrder - b.sortOrder));
         setPendingBenefitNames(pending.map((r) => r.benefit.name));

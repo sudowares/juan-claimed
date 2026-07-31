@@ -15,6 +15,10 @@ export interface BenefitEligibility {
    * short-circuiting, so this never includes a follow-up for a branch that no longer
    * matters (e.g. a benefit already disqualified by one failed ALL condition). */
   pendingFieldIds: string[];
+  /** Every field this benefit's tree references that has no answer row yet — NOT short-
+   * circuited (unlike pendingFieldIds). "Answer More" unions these across still-candidate
+   * (PENDING) benefits so the applicant can complete every relevant field at once. */
+  unansweredFieldIds: string[];
 }
 
 export async function getMyBenefitsEligibility(token?: string): Promise<BenefitEligibility[]> {
