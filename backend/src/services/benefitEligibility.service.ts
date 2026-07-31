@@ -118,10 +118,17 @@ function evaluateLeafNode(
       actualValue,
     });
     return matched ? MATCHED : NOT_ELIGIBLE;
-  } catch {
-    // A shape mismatch is a data/config bug, not the applicant's fault — treat as still
-    // unresolved rather than silently deciding it either way.
-    return PENDING(node.fieldId);
+  } catch (error) {
+    // The applicant HAS a present, non-null answer here — it just can't be evaluated against
+    // this condition (a shape/config mismatch). Fail CLOSED (NOT_ELIGIBLE), not PENDING:
+    // returning PENDING kept such a benefit showing as a still-eligible CANDIDATE in "Answer
+    // More" even when the applicant's own answer already contradicts it — the exact mismatch
+    // reported. A present answer that a condition can't confirm does not satisfy it. The error
+    // is logged so a genuine authoring bug (bad operator/target shape) is still visible and
+    // fixable server-side. (An ABSENT answer is the only "still needs answering" case, handled
+    // above as PENDING.)
+    console.error(`[BenefitEligibility] Condition eval failed for field "${node.fieldId}" (operator "${operator.value}") — treating leaf as NOT_ELIGIBLE:`, error);
+    return NOT_ELIGIBLE;
   }
 }
 
