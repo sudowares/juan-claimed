@@ -31,7 +31,12 @@ export const notifyEligibleUsersOfNewBenefit = async (benefitId: string, benefit
     for (const { id: userId } of users) {
       try {
         const detail = await evaluateBenefitEligibilityDetailById(benefitId, userId);
-        const isCandidate = detail.status === "MATCHED" || detail.leaves.some((leaf) => leaf.status === "MATCHED");
+        // "Eligible" here = none of the user's ALREADY-GIVEN answers dissatisfy any of the new
+        // benefit's field bindings — i.e. not disqualified. MATCHED (fully qualifies) and PENDING
+        // (nothing violated yet; some bindings just unanswered) both count; only NOT_ELIGIBLE is
+        // excluded. Deliberately NOT `leaves.some(MATCHED)` — that texted users who matched one
+        // condition but already FAILED another (overall NOT_ELIGIBLE) for a benefit they can't get.
+        const isCandidate = detail.status !== "NOT_ELIGIBLE";
         if (!isCandidate) continue;
 
         const answers = await resolveAnswersMapWith(prisma, userId);

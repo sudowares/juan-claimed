@@ -1,6 +1,12 @@
 import { prisma, type DbClient } from "../utils/prisma.js";
 import { compare } from "../utils/condition.util.js";
 import { fetchBenefitRuleTreeWith, type ClientBenefitRuleTreeNode, type ClientBenefitRuleTreeRoot } from "./benefitRuleGroup.service.js";
+import {
+  fetchDynamicRuleGroupTreesForFieldsWith,
+  collectReferencedFieldIds,
+  type ClientRuleTreeNode,
+  type ClientRuleTreeRoot,
+} from "./fieldRuleGroup.service.js";
 import { resolveAnswersMapWith, decodeFieldValue, type AnswerableField } from "./fieldAnswer.service.js";
 
 // Real, per-condition eligibility evaluator for the applicant-facing side — distinct from
@@ -50,12 +56,62 @@ interface NodeResult {
 // un-short-circuited counterpart to pendingFieldIds, for "Answer More". A field with any row
 // (even null value) has a key here and is treated as answered/seen. Mirrors evaluateLeafNode's
 // hasOwnProperty test.
-const unansweredOf = (fieldIds: Set<string>, answers: Record<string, unknown>): string[] =>
-  [...fieldIds].filter((fieldId) => !Object.prototype.hasOwnProperty.call(answers, fieldId));
+const unansweredOf = (fieldIds: Set<string>, answers: Record<string, unknown>, hiddenFieldIds: Set<string>): string[] =>
+  [...fieldIds].filter((fieldId) => !Object.prototype.hasOwnProperty.call(answers, fieldId) && !hiddenFieldIds.has(fieldId));
 
 const PENDING = (fieldId: string): NodeResult => ({ status: "PENDING", pendingFieldIds: [fieldId] });
 const MATCHED: NodeResult = { status: "MATCHED", pendingFieldIds: [] };
 const NOT_ELIGIBLE: NodeResult = { status: "NOT_ELIGIBLE", pendingFieldIds: [] };
+
+// Whether a field's OWN dynamicCondition (show/hide) tree currently evaluates as "show",
+// given the answers so far — the backend mirror of frontend field-visibility.ts's
+// isFieldVisible/evaluateNode (same ClientRuleTree shape, same compare()). Kept in sync by
+// hand with that file.
+const isClientTreeVisible = (node: ClientRuleTreeNode, ownFieldId: string, answers: Record<string, unknown>): boolean => {
+  if (node.kind === "group") {
+    const results = node.children.map((child) => isClientTreeVisible(child, ownFieldId, answers));
+    return node.logicalOperator === "ALL" ? results.every(Boolean) : results.some(Boolean);
+  }
+  const targetFieldId = node.conditionFieldId ?? ownFieldId;
+  const actualValue = answers[targetFieldId];
+  if (actualValue === undefined || actualValue === null) return false;
+  try {
+    return compare({ inputType: node.conditionFieldInputType, operator: node.operatorValue, targetValue: node.conditionFieldValue, actualValue });
+  } catch {
+    return false;
+  }
+};
+
+// Which of the given referenced fields are DEFINITIVELY hidden by their own show/hide
+// condition — i.e. can never be presented to this applicant, so a benefit leaf that needs an
+// answer for one of them can never be satisfied (NOT_ELIGIBLE, not a still-open PENDING).
+//
+// "Definitively" is the key: a field is only counted here when its visibility condition has a
+// real cross-field parent driver AND every field that driver reads is ALREADY answered AND the
+// condition evaluates to "hide". If any parent is still unanswered, the field is left out (that
+// parent could still be answered a way that reveals it — so it stays PENDING). Purely
+// self-referential conditions (no cross-field ref) are ignored too — there's no answered parent
+// to settle them against.
+const computeSettledHiddenFieldIds = async (
+  db: DbClient,
+  fieldIds: Set<string>,
+  answers: Record<string, unknown>,
+): Promise<Set<string>> => {
+  const hidden = new Set<string>();
+  if (fieldIds.size === 0) return hidden;
+
+  const trees = await fetchDynamicRuleGroupTreesForFieldsWith(db, [...fieldIds]);
+  for (const fieldId of fieldIds) {
+    const tree = trees.get(fieldId) as ClientRuleTreeRoot | null | undefined;
+    if (!tree) continue;
+    const refs = collectReferencedFieldIds(tree);
+    if (refs.size === 0) continue;
+    const allDepsAnswered = [...refs].every((id) => Object.prototype.hasOwnProperty.call(answers, id));
+    if (!allDepsAnswered) continue;
+    if (!isClientTreeVisible(tree, fieldId, answers)) hidden.add(fieldId);
+  }
+  return hidden;
+};
 
 // Combines a list of child results under ALL (AND) or ANY (OR) semantics, short-circuiting
 // exactly like condition.util.ts's own boolean logic would, but preserving the third
@@ -87,6 +143,7 @@ function evaluateLeafNode(
   answers: Record<string, unknown>,
   fieldMap: FieldMap,
   operatorMap: OperatorMap,
+  hiddenFieldIds: Set<string>,
 ): NodeResult {
   const field = fieldMap.get(node.fieldId);
   const operator = operatorMap.get(node.fieldConditionOperatorId);
@@ -102,7 +159,14 @@ function evaluateLeafNode(
   // of staying PENDING forever, except for the operators that are explicitly about
   // presence/absence, which are allowed to evaluate a blank value normally.
   const hasAnswer = Object.prototype.hasOwnProperty.call(answers, node.fieldId);
-  if (!hasAnswer) return PENDING(node.fieldId);
+  if (!hasAnswer) {
+    // No answer row — normally still worth asking (PENDING). But if this field is
+    // DEFINITIVELY hidden by its own show/hide condition (its parent dependency is already
+    // answered a way that hides it), the applicant can NEVER be shown it, so its answer can
+    // never arrive: fail closed (NOT_ELIGIBLE) instead of nagging forever / keeping a
+    // permanently-unsatisfiable benefit on the candidate list. See computeSettledHiddenFieldIds.
+    return hiddenFieldIds.has(node.fieldId) ? NOT_ELIGIBLE : PENDING(node.fieldId);
+  }
 
   const actualValue = answers[node.fieldId];
   const isPresenceCheck = operator.value === "IS_EMPTY" || operator.value === "IS_NOT_EMPTY";
@@ -132,14 +196,20 @@ function evaluateLeafNode(
   }
 }
 
-function evaluateTreeNode(node: ClientBenefitRuleTreeNode, answers: Record<string, unknown>, fieldMap: FieldMap, operatorMap: OperatorMap): NodeResult {
+function evaluateTreeNode(
+  node: ClientBenefitRuleTreeNode,
+  answers: Record<string, unknown>,
+  fieldMap: FieldMap,
+  operatorMap: OperatorMap,
+  hiddenFieldIds: Set<string>,
+): NodeResult {
   if (isGroupNode(node)) {
     return combine(
       node.logicalOperator,
-      node.children.map((child) => evaluateTreeNode(child, answers, fieldMap, operatorMap)),
+      node.children.map((child) => evaluateTreeNode(child, answers, fieldMap, operatorMap, hiddenFieldIds)),
     );
   }
-  return evaluateLeafNode(node, answers, fieldMap, operatorMap);
+  return evaluateLeafNode(node, answers, fieldMap, operatorMap, hiddenFieldIds);
 }
 
 export interface BenefitEligibilityLeaf {
@@ -156,13 +226,14 @@ function collectLeafStatuses(
   answers: Record<string, unknown>,
   fieldMap: FieldMap,
   operatorMap: OperatorMap,
+  hiddenFieldIds: Set<string>,
   out: { fieldId: string; status: EligibilityStatus }[],
 ) {
   if (isGroupNode(node)) {
-    node.children.forEach((child) => collectLeafStatuses(child, answers, fieldMap, operatorMap, out));
+    node.children.forEach((child) => collectLeafStatuses(child, answers, fieldMap, operatorMap, hiddenFieldIds, out));
     return;
   }
-  out.push({ fieldId: node.fieldId, status: evaluateLeafNode(node, answers, fieldMap, operatorMap).status });
+  out.push({ fieldId: node.fieldId, status: evaluateLeafNode(node, answers, fieldMap, operatorMap, hiddenFieldIds).status });
 }
 
 // Assembles one repeater field's rows into the Array<Record<fieldId,value>> shape
@@ -268,10 +339,11 @@ export const evaluateBenefitEligibilityWith = async (
     if (rows.length > 0) answers[repeaterFieldId] = rows;
   }
 
-  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
+  const hidden = await computeSettledHiddenFieldIds(db, fieldIds, answers);
+  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers) };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
 };
 
 export const evaluateBenefitEligibility = async (benefit: BenefitForEligibility, userId: string): Promise<BenefitEligibilityResult> => {
@@ -350,16 +422,17 @@ export const evaluateBenefitEligibilityDetailById = async (benefitId: string, us
     if (rows.length > 0) answers[repeaterFieldId] = rows;
   }
 
+  const hidden = await computeSettledHiddenFieldIds(prisma, fieldIds, answers);
   const rawLeaves: { fieldId: string; status: EligibilityStatus }[] = [];
-  collectLeafStatuses(tree, answers, fieldMap, operatorMap, rawLeaves);
+  collectLeafStatuses(tree, answers, fieldMap, operatorMap, hidden, rawLeaves);
   for (const leaf of rawLeaves) {
     leaves.push({ fieldId: leaf.fieldId, fieldLabel: fieldLabelById.get(leaf.fieldId) ?? leaf.fieldId, status: leaf.status });
   }
 
-  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
+  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers) };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
 };
 
 // --- Guest evaluation ("public/no account" flow) ---------------------------------------
@@ -441,10 +514,11 @@ async function evaluateBenefitEligibilityForAnswersWith(
 
   const answers = { ...baseAnswers, ...(source.repeaterRows ?? {}) };
 
-  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
+  const hidden = await computeSettledHiddenFieldIds(db, fieldIds, answers);
+  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers) };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
 }
 
 export const evaluateAllBenefitsEligibilityForAnswers = async (source: GuestAnswerSource): Promise<BenefitEligibilityResult[]> => {
@@ -491,14 +565,15 @@ export const evaluateBenefitEligibilityDetailForAnswers = async (benefitId: stri
 
   const answers = { ...baseAnswers, ...(source.repeaterRows ?? {}) };
 
+  const hidden = await computeSettledHiddenFieldIds(prisma, fieldIds, answers);
   const rawLeaves: { fieldId: string; status: EligibilityStatus }[] = [];
-  collectLeafStatuses(tree, answers, fieldMap, operatorMap, rawLeaves);
+  collectLeafStatuses(tree, answers, fieldMap, operatorMap, hidden, rawLeaves);
   for (const leaf of rawLeaves) {
     leaves.push({ fieldId: leaf.fieldId, fieldLabel: fieldLabelById.get(leaf.fieldId) ?? leaf.fieldId, status: leaf.status });
   }
 
-  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap);
+  const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers) };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
 };
