@@ -205,13 +205,16 @@ export const translateText = async (prompt: string, sourceLang: string, targetLa
 
 // POST /messaging/v1/sms/push — send a single SMS. No bulk-send endpoint exists yet, so
 // callers wanting to notify many numbers must loop this one at a time (see
-// benefitNotification.service.ts).
+// benefitNotification.service.ts). Auth is the static access token passed in the
+// `X-EMESSAGE-Auth` header (NOT an Authorization: Bearer — the gateway rejects that with
+// 400 "token was not define in your request"). On success eGov returns 201 with
+// { data: { message: "SMS was successfully created." } }.
 export const sendSms = async (number: string, message: string): Promise<void> => {
   try {
     await axios.post(
       `${EGOV_MESSAGE_BASE_URL}/messaging/v1/sms/push`,
       { number, message },
-      { headers: { Authorization: `Bearer ${EGOV_EMESSAGE_ACCESS_TOKEN}`, "Content-Type": "application/json" } },
+      { headers: { "X-EMESSAGE-Auth": EGOV_EMESSAGE_ACCESS_TOKEN, "Content-Type": "application/json" } },
     );
   } catch (error) {
     throw egovRequestFailed(`eGov SMS push failed for ${number}`, error);
