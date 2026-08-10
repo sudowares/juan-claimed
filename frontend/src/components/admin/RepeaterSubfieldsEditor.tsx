@@ -187,8 +187,8 @@ function SubfieldRow({
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">{subfield.englishName || "Untitled subfield"}</p>
-          <p className="truncate text-xs text-muted-foreground">{inputType?.englishName ?? "No type selected"}</p>
+          <p className="text-sm font-medium text-foreground">{subfield.englishName || "Untitled subfield"}</p>
+          <p className="text-xs text-muted-foreground">{inputType?.englishName ?? "No type selected"}</p>
         </div>
         {!disabled && (
           <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={onRemove}>

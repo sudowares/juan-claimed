@@ -251,4 +251,35 @@
   .apply-bg .field-surface-disabled {
     background-color: #f5f6fa;
   }
+
+  /* Admin modals only (Modal in ui/modal.tsx stamps .admin-modal-text on its DialogContent)
+     — every text-size utility inside bumped one Tailwind step for readability, without
+     touching the same shared field/label/dropdown primitives when they render on the
+     public apply-bg side (FieldInput.tsx wires FloatingLabelField into that flow too, and
+     SelectField/MultiSelectField build on the same SearchableSelect). Popovers opened from
+     inside a modal are re-pointed to portal inside .admin-modal-text instead of
+     document.body (see PortalContainerContext / ui/popover.tsx) specifically so this reaches
+     dropdown option text too, not just the trigger. Two-class specificity beats each single
+     utility class, same technique as .apply-bg .field-surface-disabled above. */
+  .admin-modal-text .text-\[9px\] {
+    font-size: 10px;
+  }
+  .admin-modal-text .text-\[10px\] {
+    font-size: 12px;
+  }
+  .admin-modal-text .text-\[11px\] {
+    font-size: 13px;
+  }
+  .admin-modal-text .text-xs {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  .admin-modal-text .text-sm {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  .admin-modal-text .text-lg {
+    font-size: 1.25rem;
+    line-height: 1.75rem;
+  }
 }

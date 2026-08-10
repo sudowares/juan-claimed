@@ -131,8 +131,8 @@ function ItemRow({
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
         </button>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">{item.englishName || "Untitled"}</p>
-          <p className="truncate text-xs text-muted-foreground">{item.attachments.length > 0 ? `${item.attachments.length} attachment(s)` : "No attachments"}</p>
+          <p className="text-sm font-medium text-foreground">{item.englishName || "Untitled"}</p>
+          <p className="text-xs text-muted-foreground">{item.attachments.length > 0 ? `${item.attachments.length} attachment(s)` : "No attachments"}</p>
         </div>
         {!disabled && (
           <Button type="button" size="icon" variant="ghost" className="size-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={onRemove}>

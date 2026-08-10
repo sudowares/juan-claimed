@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogClose, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { PortalContainerContext } from "@/lib/portal-container";
 
 // Same percent-of-viewport scale as SidePanel (components/ui/side-panel.tsx), so xs/sm/md/
 // lg/xl mean the same width share regardless of which shell a form uses.
@@ -49,31 +50,41 @@ export function Modal({
   contentClassName,
   bodyClassName,
 }: ModalProps) {
+  // Doubles as the portal target for every Popover opened from inside this modal (see
+  // PortalContainerContext) — display:contents keeps it out of the flex layout below, it
+  // exists purely as a DOM anchor so .admin-modal-text (index.css) reaches dropdown content
+  // that would otherwise portal straight to document.body, outside this subtree entirely.
+  const [portalContainer, setPortalContainer] = React.useState<HTMLDivElement | null>(null);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className={cn("flex max-h-[85vh] w-full flex-col gap-5 p-6", MODAL_SIZES[size], contentClassName)}
+        className={cn("admin-modal-text flex max-h-[85vh] w-full flex-col gap-5 p-6", MODAL_SIZES[size], contentClassName)}
       >
-        {(title || description) && (
-          <div className="flex shrink-0 items-start justify-between gap-4">
-            <div className="space-y-1">
-              {title && <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>}
-              {description && <DialogDescription>{description}</DialogDescription>}
-            </div>
-            {showCloseButton && (
-              <DialogClose asChild>
-                <Button type="button" size="icon" variant="ghost" className="-mt-1 -mr-1 size-8 shrink-0">
-                  <X className="size-4" />
-                </Button>
-              </DialogClose>
+        <div ref={setPortalContainer} className="contents">
+          <PortalContainerContext.Provider value={portalContainer}>
+            {(title || description) && (
+              <div className="flex shrink-0 items-start justify-between gap-4">
+                <div className="space-y-1">
+                  {title && <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>}
+                  {description && <DialogDescription>{description}</DialogDescription>}
+                </div>
+                {showCloseButton && (
+                  <DialogClose asChild>
+                    <Button type="button" size="icon" variant="ghost" className="-mt-1 -mr-1 size-8 shrink-0">
+                      <X className="size-4" />
+                    </Button>
+                  </DialogClose>
+                )}
+              </div>
             )}
-          </div>
-        )}
 
-        <div className={cn("min-h-0 flex-1 space-y-7 overflow-y-auto thin-scrollbar", bodyClassName)}>{children}</div>
+            <div className={cn("min-h-0 flex-1 space-y-7 overflow-y-auto thin-scrollbar", bodyClassName)}>{children}</div>
 
-        {footer && <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row sm:justify-end">{footer}</div>}
+            {footer && <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row sm:justify-end">{footer}</div>}
+          </PortalContainerContext.Provider>
+        </div>
       </DialogContent>
     </Dialog>
   );

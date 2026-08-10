@@ -95,7 +95,7 @@ function GroupEditor({
           value={node.logicalOperator}
           onChange={(v) => onChange({ ...node, logicalOperator: v as "ALL" | "ANY" })}
           options={LOGICAL_OPERATOR_OPTIONS}
-          triggerClassName="w-24"
+          triggerClassName="min-w-24"
         />
         <span className="text-xs text-muted-foreground">the following conditions:</span>
       </div>
@@ -188,7 +188,7 @@ function ConditionLeafEditor({
         onChange={handleFieldChange}
         options={dependencyFields.map((f) => ({ value: f.id, label: f.englishName, sublabel: f.tagalogName }))}
         placeholder="Field"
-        triggerClassName="w-48"
+        triggerClassName="min-w-48"
       />
 
       {field && (
@@ -197,7 +197,7 @@ function ConditionLeafEditor({
           onChange={(v) => onChange({ ...node, fieldConditionOperatorId: v, operatorValue: fieldOperators.find((o) => o.id === v)?.value ?? "", conditionFieldValue: null })}
           options={fieldOperators.map((o) => ({ value: o.id, label: o.englishName, sublabel: o.tagalogName }))}
           placeholder="Operator"
-          triggerClassName="w-40"
+          triggerClassName="min-w-40"
         />
       )}
 

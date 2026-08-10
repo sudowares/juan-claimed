@@ -39,9 +39,9 @@ export function inlineOptionLabel(opt: { label: string; sublabel?: string }): st
 // value, instead of an empty second line.
 export function OptionLabel({ label, sublabel }: { label: string; sublabel?: string }) {
   return (
-    <span className="flex min-w-0 flex-col">
-      <span className="truncate">{label}</span>
-      {sublabel && sublabel !== label && <span className="truncate text-xs italic text-muted-foreground">{sublabel}</span>}
+    <span className="flex flex-col">
+      <span>{label}</span>
+      {sublabel && sublabel !== label && <span className="text-xs italic text-muted-foreground">{sublabel}</span>}
     </span>
   );
 }
@@ -110,19 +110,21 @@ export function SearchableSelect({
           "flex items-center text-left text-sm disabled:cursor-not-allowed disabled:opacity-50",
           variant === "bordered" &&
             cn(
-              "w-fit gap-2 rounded-md border border-input bg-transparent px-3 py-2 shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
-              size === "sm" ? "h-8" : "h-10",
+              "w-fit max-w-64 gap-2 rounded-md border border-input bg-transparent px-3 py-2 shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
+              size === "sm" ? "min-h-8" : "min-h-10",
             ),
           variant === "bare" && "w-full",
           triggerClassName,
         )}
       >
-        <span className={cn("min-w-0 flex-1 truncate", !selectedOption && "text-muted-foreground", variant === "bare" && !selectedOption && "text-transparent")}>
+        <span
+          className={cn("min-w-0 flex-1", variant === "bare" && "truncate", !selectedOption && "text-muted-foreground", variant === "bare" && !selectedOption && "text-transparent")}
+        >
           {selectedOption ? inlineOptionLabel(selectedOption) : variant === "bordered" ? placeholder : " "}
         </span>
-        {variant === "bordered" && <ChevronDown className="size-4 shrink-0 opacity-50" />}
+        {variant === "bordered" && <ChevronDown className="size-4 shrink-0 self-start opacity-50" />}
       </PopoverTrigger>
-      <PopoverContent align="start" className={cn("w-64 p-0", contentClassName)}>
+      <PopoverContent align="start" className={cn("min-w-64 w-max max-w-80 p-0", contentClassName)}>
         <div className="shrink-0 border-b border-border p-2">
           <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 border-0 shadow-none focus-visible:ring-0" />
         </div>
@@ -255,7 +257,7 @@ export function MultiSearchableSelect({
           ))
         )}
       </PopoverTrigger>
-      <PopoverContent align="start" className={cn("w-64 p-0", contentClassName)}>
+      <PopoverContent align="start" className={cn("min-w-64 w-max p-0", contentClassName)}>
         <div className="shrink-0 border-b border-border p-2">
           <Input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…" className="h-8 border-0 shadow-none focus-visible:ring-0" />
         </div>

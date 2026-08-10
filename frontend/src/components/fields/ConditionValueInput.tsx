@@ -136,7 +136,7 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
         <Input type="number" placeholder="Min" value={v.min ?? ""} onChange={(e) => onChange({ ...v, min: Number(e.target.value), unit: v.unit ?? "months" })} className="w-20" />
         <span className="text-xs text-muted-foreground">to</span>
         <Input type="number" placeholder="Max" value={v.max ?? ""} onChange={(e) => onChange({ ...v, max: Number(e.target.value), unit: v.unit ?? "months" })} className="w-20" />
-        <SearchableSelect value={v.unit ?? "months"} onChange={(u) => onChange({ ...v, unit: u })} options={DURATION_UNIT_OPTIONS} triggerClassName="w-28" />
+        <SearchableSelect value={v.unit ?? "months"} onChange={(u) => onChange({ ...v, unit: u })} options={DURATION_UNIT_OPTIONS} triggerClassName="min-w-28" />
       </div>
     );
   }
@@ -157,7 +157,7 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
     return (
       <div className="flex items-center gap-2">
         <Input type="number" value={v.value ?? ""} onChange={(e) => onChange({ value: Number(e.target.value), unit: v.unit ?? "years" })} className="w-20" />
-        <SearchableSelect value={v.unit ?? "years"} onChange={(u) => onChange({ value: v.value ?? 0, unit: u })} options={AGE_UNIT_OPTIONS} triggerClassName="w-28" />
+        <SearchableSelect value={v.unit ?? "years"} onChange={(u) => onChange({ value: v.value ?? 0, unit: u })} options={AGE_UNIT_OPTIONS} triggerClassName="min-w-28" />
       </div>
     );
   }
@@ -169,7 +169,7 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
         <Input type="number" placeholder="Min" value={v.min ?? ""} onChange={(e) => onChange({ ...v, min: Number(e.target.value), unit: v.unit ?? "years" })} className="w-20" />
         <span className="text-xs text-muted-foreground">to</span>
         <Input type="number" placeholder="Max" value={v.max ?? ""} onChange={(e) => onChange({ ...v, max: Number(e.target.value), unit: v.unit ?? "years" })} className="w-20" />
-        <SearchableSelect value={v.unit ?? "years"} onChange={(u) => onChange({ ...v, unit: u })} options={AGE_UNIT_OPTIONS} triggerClassName="w-28" />
+        <SearchableSelect value={v.unit ?? "years"} onChange={(u) => onChange({ ...v, unit: u })} options={AGE_UNIT_OPTIONS} triggerClassName="min-w-28" />
       </div>
     );
   }
@@ -179,7 +179,7 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
     return (
       <div className="flex items-center gap-2">
         <Input type="number" value={v.value ?? ""} onChange={(e) => onChange({ value: Number(e.target.value), unit: v.unit ?? "months" })} className="w-20" />
-        <SearchableSelect value={v.unit ?? "months"} onChange={(u) => onChange({ value: v.value ?? 0, unit: u })} options={DURATION_UNIT_OPTIONS} triggerClassName="w-28" />
+        <SearchableSelect value={v.unit ?? "months"} onChange={(u) => onChange({ value: v.value ?? 0, unit: u })} options={DURATION_UNIT_OPTIONS} triggerClassName="min-w-28" />
       </div>
     );
   }
@@ -191,7 +191,7 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
         onChange={(v) => onChange(v === "true")}
         options={BOOLEAN_OPTIONS}
         placeholder="Value"
-        triggerClassName="w-28"
+        triggerClassName="min-w-28"
       />
     );
   }
@@ -220,7 +220,7 @@ export function ConditionValueInput({ field, operator, value, onChange, hierarch
         onChange={onChange}
         options={options.map((o) => ({ value: o.value, label: o.englishName, sublabel: o.tagalogName }))}
         placeholder={loadingOptions ? "Loading..." : "Value"}
-        triggerClassName="w-44"
+        triggerClassName="min-w-44"
       />
     );
   }
@@ -378,7 +378,7 @@ function RepeaterRowConditionBuilder({
           value={root.logicalOperator}
           onChange={(v) => emit({ ...root, logicalOperator: v as "ALL" | "ANY" })}
           options={REPEATER_ROW_MATCH_OPTIONS}
-          triggerClassName="w-24"
+          triggerClassName="min-w-24"
         />
         <span className="text-xs text-muted-foreground">these hold:</span>
       </div>
@@ -396,7 +396,7 @@ function RepeaterRowConditionBuilder({
               onChange={(v) => changeSubfield(index, v)}
               options={subfields.map((s) => ({ value: s.id, label: s.englishName, sublabel: s.tagalogName }))}
               placeholder="Column"
-              triggerClassName="w-44"
+              triggerClassName="min-w-44"
             />
             {subfield && (
               <SearchableSelect
@@ -404,7 +404,7 @@ function RepeaterRowConditionBuilder({
                 onChange={(v) => updateLeaf(index, { operator: v, conditionFieldValue: null })}
                 options={leafOperators.map((o) => ({ value: o.value, label: o.englishName, sublabel: o.tagalogName }))}
                 placeholder="Operator"
-                triggerClassName="w-40"
+                triggerClassName="min-w-40"
               />
             )}
             {subfield && operator && (
@@ -464,7 +464,7 @@ function RepeaterAggregateInput({ field, value, onChange }: { field: DimField; v
         onChange={(subfieldId) => onChange({ ...v, subfieldId })}
         options={numericSubfields.map((s) => ({ value: s.id, label: s.englishName, sublabel: s.tagalogName }))}
         placeholder={numericSubfields.length === 0 ? "No number column" : "Column"}
-        triggerClassName="w-40"
+        triggerClassName="min-w-40"
       />
       <Input
         type="number"
