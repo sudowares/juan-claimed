@@ -74,11 +74,22 @@ const assertHierarchyExists = async (db: DbClient, fieldHierarchyId: string) => 
   }
 };
 
-// FETCH ALL HIERARCHIES (with levels, for a "reuse an existing hierarchy" picker — nodes
-// are omitted here since a hierarchy's node tree can be large; fetch by id for that)
+// FETCH ALL HIERARCHIES (with levels + nodes). Nodes were originally omitted here on the
+// theory that a hierarchy's node tree could be large, but every consumer (admin's "reuse an
+// existing hierarchy" picker AND every place that actually renders/answers a HIERARCHY_SELECT
+// field — FieldInput.tsx, ConditionValueInput.tsx, ConditionTreeView.tsx) reads
+// hierarchy.fieldHierarchyNodes straight off this list, so leaving it out silently rendered
+// zero options for every non-PH_LOCATION hierarchy (PH_LOCATION is special-cased everywhere
+// it's consumed and never actually populates real DimFieldHierarchyNode rows — its options
+// come live from the PSGC API instead, so it was never affected by this). In practice every
+// hierarchy that does have nodes here is a small, hand-authored one, so including them stays
+// cheap.
 export const fetchAllHierarchies = async () => {
   return await prisma.dimFieldHierarchy.findMany({
-    include: { fieldHierarchyLevels: { orderBy: { level: "asc" } } },
+    include: {
+      fieldHierarchyLevels: { orderBy: { level: "asc" } },
+      fieldHierarchyNodes: { orderBy: { sortOrder: "asc" } },
+    },
     orderBy: { englishName: "asc" },
   });
 };
