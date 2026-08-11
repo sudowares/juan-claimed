@@ -23,6 +23,9 @@ const mapError = (message: string): MappedError => {
   if (message.startsWith("SCOPE_NOT_FOUND")) {
     return { status: 500, friendlyMessage: "An unexpected server configuration error occurred." };
   }
+  if (message.startsWith("PSGC_LOOKUP_FAILED")) {
+    return { status: 503, friendlyMessage: "Could not verify the location right now — the location lookup service is temporarily unreachable. Please try again in a moment." };
+  }
   if (message.startsWith("INVALID_CREDENTIALS")) {
     return { status: 401, friendlyMessage: "Incorrect username or password." };
   }
