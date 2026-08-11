@@ -59,6 +59,15 @@ interface NodeResult {
 const unansweredOf = (fieldIds: Set<string>, answers: Record<string, unknown>, hiddenFieldIds: Set<string>): string[] =>
   [...fieldIds].filter((fieldId) => !Object.prototype.hasOwnProperty.call(answers, fieldId) && !hiddenFieldIds.has(fieldId));
 
+// unansweredFieldIds otherwise only ever covers the eligibility TREE's own leaf references —
+// residency is evaluated separately (evaluateResidency) and its field id never enters
+// `fieldIds`/unansweredOf. A benefit that's PENDING purely because Residence hasn't been
+// answered yet (no tree at all, or a tree that's already fully resolved) previously reported
+// an EMPTY unansweredFieldIds: "Answer More" counted it as a live candidate but had nothing
+// to actually render for it — the exact "N candidate benefits, zero questions" symptom.
+// Folded in at every return site below instead.
+const withResidency = (residencyPendingFieldIds: string[], treeUnanswered: string[]): string[] => [...new Set([...residencyPendingFieldIds, ...treeUnanswered])];
+
 const PENDING = (fieldId: string): NodeResult => ({ status: "PENDING", pendingFieldIds: [fieldId] });
 const MATCHED: NodeResult = { status: "MATCHED", pendingFieldIds: [] };
 const NOT_ELIGIBLE: NodeResult = { status: "NOT_ELIGIBLE", pendingFieldIds: [] };
@@ -316,7 +325,7 @@ export const evaluateBenefitEligibilityWith = async (
   // No eligibility tree authored at all — an "optional" tree per BenefitFormModal — means
   // there's nothing further to check beyond residency.
   if (!tree) {
-    return { benefitId: benefit.id, ...residency, unansweredFieldIds: [] };
+    return { benefitId: benefit.id, ...residency, unansweredFieldIds: residency.pendingFieldIds };
   }
 
   const fieldIds = new Set<string>();
@@ -343,7 +352,7 @@ export const evaluateBenefitEligibilityWith = async (
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
 };
 
 export const evaluateBenefitEligibility = async (benefit: BenefitForEligibility, userId: string): Promise<BenefitEligibilityResult> => {
@@ -400,7 +409,7 @@ export const evaluateBenefitEligibilityDetailById = async (benefitId: string, us
 
   if (!tree) {
     const combined = combine("ALL", [residency]);
-    return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: [] };
+    return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: residency.pendingFieldIds };
   }
 
   const fieldIds = new Set<string>();
@@ -432,7 +441,7 @@ export const evaluateBenefitEligibilityDetailById = async (benefitId: string, us
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
 };
 
 // --- Guest evaluation ("public/no account" flow) ---------------------------------------
@@ -498,7 +507,7 @@ async function evaluateBenefitEligibilityForAnswersWith(
   const residency = await evaluateResidency(db, benefit, baseAnswers);
 
   if (!tree) {
-    return { benefitId: benefit.id, ...residency, unansweredFieldIds: [] };
+    return { benefitId: benefit.id, ...residency, unansweredFieldIds: residency.pendingFieldIds };
   }
 
   const fieldIds = new Set<string>();
@@ -518,7 +527,7 @@ async function evaluateBenefitEligibilityForAnswersWith(
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
 }
 
 export const evaluateAllBenefitsEligibilityForAnswers = async (source: GuestAnswerSource): Promise<BenefitEligibilityResult[]> => {
@@ -548,7 +557,7 @@ export const evaluateBenefitEligibilityDetailForAnswers = async (benefitId: stri
 
   if (!tree) {
     const combined = combine("ALL", [residency]);
-    return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: [] };
+    return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: residency.pendingFieldIds };
   }
 
   const fieldIds = new Set<string>();
@@ -575,5 +584,5 @@ export const evaluateBenefitEligibilityDetailForAnswers = async (benefitId: stri
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: unansweredOf(fieldIds, answers, hidden) };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
 };
