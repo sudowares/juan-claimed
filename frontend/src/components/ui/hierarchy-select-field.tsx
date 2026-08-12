@@ -104,15 +104,31 @@ export function HierarchySelectField({
 }: HierarchySelectFieldProps) {
   // Reconstruct the selected node's ancestor chain so each level's select shows the right
   // pre-selection when re-opening an already-answered field.
-  const selectedNode = nodes.find((n) => n.value === value);
-  const chain: string[] = [];
-  let walker = selectedNode;
-  while (walker) {
-    chain.unshift(walker.id);
-    walker = walker.parentId ? nodes.find((n) => n.id === walker!.parentId) : undefined;
-  }
+  const chain = React.useMemo(() => {
+    const selectedNode = nodes.find((n) => n.value === value);
+    const result: string[] = [];
+    let walker = selectedNode;
+    while (walker) {
+      result.unshift(walker.id);
+      walker = walker.parentId ? nodes.find((n) => n.id === walker!.parentId) : undefined;
+    }
+    return result;
+  }, [nodes, value]);
 
   const [path, setPath] = React.useState<string[]>(chain);
+
+  // `nodes` (fetched async in FieldInput.tsx) and `value` (fetched async from the user's
+  // answers) both typically arrive AFTER this component's first render, when `chain` above
+  // still computes empty — but useState's initializer only ever runs once at mount, so
+  // without this, `path` would stay stuck empty forever once the real data lands, showing
+  // every level as unselected even though the answer is already saved. Keyed on `nodes.length`
+  // rather than `nodes` itself since FieldInput.tsx rebuilds that array fresh on every render
+  // (unmemoized) — using the array reference would clobber an in-progress pick on every
+  // keystroke elsewhere in the form.
+  React.useEffect(() => {
+    setPath(chain);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, nodes.length]);
 
   const handleSelectAt = (depth: number, nodeId: string) => {
     const newPath = [...path.slice(0, depth), nodeId];
