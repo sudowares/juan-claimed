@@ -26,11 +26,12 @@ export interface BenefitEligibilityResult {
    * applicant is never asked to answer more questions for a benefit they're already
    * disqualified from, or already qualify for through a different branch). */
   pendingFieldIds: string[];
-  /** EVERY field this benefit's eligibility tree references that the applicant has no answer
-   * row for yet — NOT short-circuited (unlike pendingFieldIds). "Answer More" uses this so an
-   * applicant can fill in every benefit-relevant field at once, not just the one next question
-   * a pruned AND/OR branch happens to still need. A field with a (even null) answer row counts
-   * as answered, so it's excluded. Empty when there's no tree (residency-only benefit). */
+  /** EVERY field this benefit's eligibility tree references that the applicant has no REAL
+   * (non-null) answer for yet — NOT short-circuited (unlike pendingFieldIds). "Answer More"
+   * uses this so an applicant can fill in every benefit-relevant field at once, not just the
+   * one next question a pruned AND/OR branch happens to still need. A field with a null-valued
+   * answer row (asked, left blank) still counts as unanswered here, so it keeps resurfacing.
+   * Empty when there's no tree (residency-only benefit). */
   unansweredFieldIds: string[];
 }
 
@@ -52,12 +53,14 @@ interface NodeResult {
   pendingFieldIds: string[];
 }
 
-// Every referenced field the applicant has no answer row for (never presented) — the
-// un-short-circuited counterpart to pendingFieldIds, for "Answer More". A field with any row
-// (even null value) has a key here and is treated as answered/seen. Mirrors evaluateLeafNode's
-// hasOwnProperty test.
+// Every referenced field the applicant has no REAL answer for — no row at all, or a row with
+// a null value (asked and left blank) — the un-short-circuited counterpart to pendingFieldIds,
+// for "Answer More". Mirrors evaluateLeafNode's hasAnswer/null handling: a blank answer keeps
+// getting asked instead of being treated as permanently settled.
 const unansweredOf = (fieldIds: Set<string>, answers: Record<string, unknown>, hiddenFieldIds: Set<string>): string[] =>
-  [...fieldIds].filter((fieldId) => !Object.prototype.hasOwnProperty.call(answers, fieldId) && !hiddenFieldIds.has(fieldId));
+  [...fieldIds].filter(
+    (fieldId) => (!Object.prototype.hasOwnProperty.call(answers, fieldId) || answers[fieldId] === null) && !hiddenFieldIds.has(fieldId),
+  );
 
 // unansweredFieldIds otherwise only ever covers the eligibility TREE's own leaf references —
 // residency is evaluated separately (evaluateResidency) and its field id never enters
@@ -160,27 +163,28 @@ function evaluateLeafNode(
   // resolved either way — fail closed rather than silently granting eligibility.
   if (!field || !operator) return NOT_ELIGIBLE;
 
-  // A missing key means this field has never been presented/answered at all (still worth
-  // asking about — see fieldAnswer.service.ts's resolveAnswersMapWith, which only adds a
-  // key for a field that actually has a FctUserFieldAnswer row). A present key with a null
-  // value means the applicant WAS already asked and left it blank — the form only ever
-  // renders once, so there's nothing left to prompt for; that resolves definitively instead
-  // of staying PENDING forever, except for the operators that are explicitly about
-  // presence/absence, which are allowed to evaluate a blank value normally.
+  // A missing key means this field has never been presented/answered at all — always still
+  // worth asking (PENDING), regardless of operator: an unasked field can't be evaluated as
+  // "empty" yet, only as unanswered.
   const hasAnswer = Object.prototype.hasOwnProperty.call(answers, node.fieldId);
   if (!hasAnswer) {
-    // No answer row — normally still worth asking (PENDING). But if this field is
-    // DEFINITIVELY hidden by its own show/hide condition (its parent dependency is already
-    // answered a way that hides it), the applicant can NEVER be shown it, so its answer can
-    // never arrive: fail closed (NOT_ELIGIBLE) instead of nagging forever / keeping a
-    // permanently-unsatisfiable benefit on the candidate list. See computeSettledHiddenFieldIds.
+    // But if this field is DEFINITIVELY hidden by its own show/hide condition (its parent
+    // dependency is already answered a way that hides it), the applicant can NEVER be shown
+    // it, so its answer can never arrive: fail closed (NOT_ELIGIBLE) instead of nagging
+    // forever / keeping a permanently-unsatisfiable benefit on the candidate list. See
+    // computeSettledHiddenFieldIds.
     return hiddenFieldIds.has(node.fieldId) ? NOT_ELIGIBLE : PENDING(node.fieldId);
   }
 
+  // A present key with a null value means the applicant WAS already asked and left it blank —
+  // treated identically to never having answered (still worth asking about) so it keeps
+  // resurfacing instead of permanently settling, EXCEPT for the operators that are explicitly
+  // about presence/absence, which are allowed to evaluate a blank value normally (a null
+  // actualValue IS a meaningful answer for IS_EMPTY/IS_NOT_EMPTY).
   const actualValue = answers[node.fieldId];
   const isPresenceCheck = operator.value === "IS_EMPTY" || operator.value === "IS_NOT_EMPTY";
   if ((actualValue === undefined || actualValue === null) && !isPresenceCheck) {
-    return NOT_ELIGIBLE;
+    return hiddenFieldIds.has(node.fieldId) ? NOT_ELIGIBLE : PENDING(node.fieldId);
   }
 
   try {
@@ -300,8 +304,11 @@ async function evaluateResidency(db: DbClient, benefit: BenefitForEligibility, a
   const hasAnswer = Object.prototype.hasOwnProperty.call(answers, residenceField.id);
   if (!hasAnswer) return PENDING(residenceField.id);
 
+  // A present-but-null answer (asked, left blank) is treated the same as never having
+  // answered — keeps resurfacing instead of permanently disqualifying the applicant. Mirrors
+  // evaluateLeafNode's null handling.
   const ancestorPath = answers[residenceField.id];
-  if (ancestorPath === undefined || ancestorPath === null) return NOT_ELIGIBLE;
+  if (ancestorPath === undefined || ancestorPath === null) return PENDING(residenceField.id);
 
   const targets = benefit.benefitPsgcCodes.map((pc) => pc.psgcCode);
   const path = Array.isArray(ancestorPath) ? (ancestorPath as string[]) : [];
