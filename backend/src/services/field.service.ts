@@ -59,7 +59,7 @@ export interface CompositeFieldInput {
 // collision in EITHER language blocks the save, not just English.
 const findFieldByName = async (db: DbClient, englishName: string, tagalogName: string, excludeId?: string) => {
   const fields = await db.dimField.findMany({
-    where: excludeId ? { id: { not: excludeId } } : {},
+    where: { deletedAt: null, ...(excludeId ? { id: { not: excludeId } } : {}) },
     select: { id: true, englishName: true, tagalogName: true },
   });
   return fields.find((field) => namesMatch(field.englishName, englishName) || namesMatch(field.tagalogName, tagalogName)) ?? null;
