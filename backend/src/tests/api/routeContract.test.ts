@@ -44,7 +44,7 @@ const PROTECTED_ROUTES: Route[] = [
   { method: "DELETE", path: `/api/users/${MISSING_UUID}` },
 
   { method: "GET", path: "/api/groups" },
-  { method: "GET", path: `/api/groups/${MISSING_UUID}` },
+  { method: "GET", path: `/api/groups/${MISSING_UUID}` },  // 401 must win over the 404 the id would otherwise produce
   { method: "POST", path: "/api/groups", body: {} },
   { method: "PUT", path: `/api/groups/${MISSING_UUID}`, body: {} },
 

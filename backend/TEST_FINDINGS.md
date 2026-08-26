@@ -5,7 +5,7 @@ suite boots the real Express app against a real Postgres seeded from `prisma/see
 talks to it over HTTP, so what it reports is what a client would actually get.
 
 ```bash
-npm test                  # 593 tests across 73 suites
+npm test                  # 599 tests across 73 suites
 npm run typecheck:tests   # the suite is excluded from `npm run build`, checked separately
 ```
 
@@ -18,7 +18,7 @@ marked ⚠️ below.
 
 | Group | Finding | Status |
 | --- | --- | --- |
-| **1** | Authorization holes | 1.4, 1.5 fixed · **1.1, 1.2, 1.3, 1.6, 1.7 open** |
+| **1** | Authorization holes | 1.2, 1.4, 1.5 fixed · 1.3 deferred · **1.1, 1.6, 1.7 open** |
 | **1b** | "Answer more" quiz (1b.1 – 1b.3) | Fixed |
 | **2** | Broken for real users (2.1 – 2.7) | Fixed |
 | **3** | API contract / robustness (3.1 – 3.2) | Fixed |
@@ -32,10 +32,10 @@ does, not by how hard it is to fix.
 
 ## Severity 1 — Authorization holes  ·  OPEN
 
-Left for you to review. Every one of these is a decision about who should be allowed to
-do what, and picking wrong in either direction has consequences — too tight breaks a
-real flow, too loose is the hole itself. The fix for each is written out below and all
-seven have a failing test waiting.
+Each of these is a decision about who should be allowed to do what, and picking wrong in
+either direction has consequences — too tight breaks a real flow, too loose is the hole
+itself. So they're being worked through one at a time. ✅ done · ⏸️ deferred by decision ·
+⚠️ still to discuss. Every item still marked ⚠️ or ⏸️ has a failing test waiting for it.
 
 ### ⚠️ 1.1 Any signed-in applicant can read the entire staff directory
 
@@ -74,7 +74,7 @@ If a `USER` genuinely needs to read their own record, that's what
 
 ---
 
-### ⚠️ 1.2 The group directory is world-readable
+### ✅ 1.2 The group directory is world-readable
 
 `src/routes/group.route.ts:16-17`
 
@@ -93,20 +93,36 @@ all carry an explicit `/public` segment and a comment explaining why.
 **Failing tests:** `group.test.ts` › "requires authentication" (×2),
 `routeContract.test.ts` › "GET /api/groups returns 401 without credentials"
 
-**Fix.**
+**Fixed.** A new `VIEW_GROUPS: [SUPERADMIN, AGENT]` permission, applied to both reads:
 
 ```ts
-groupRouter.get("/", mockAuth, requireRole(PERMISSIONS.PARTICIPATE), getAllGroups);
-groupRouter.get("/:id", mockAuth, requireRole(PERMISSIONS.PARTICIPATE), getGroupById);
+groupRouter.get("/", mockAuth, requireRole(PERMISSIONS.VIEW_GROUPS), getAllGroups);
+groupRouter.get("/:id", mockAuth, requireRole(PERMISSIONS.VIEW_GROUPS), getGroupById);
 ```
 
-If the public/no-account benefit flow needs group names, add an explicit
-`GET /api/groups/public` alongside the other public routes rather than leaving
-the main ones open.
+Staff-only rather than "any authenticated account", because that's what the consumers
+actually are — the Groups page, My Group, the admin Profile page, and the group pickers in
+Create User / Assign Role / the Benefit form. Nothing applicant-facing reads this route: a
+guest gets a benefit's owning group embedded in the benefit payload itself
+(`benefitGroups: { include: { group: true } }`, `benefit.service.ts:86`).
+
+Two things were checked before making the change, because "two-line fix" would have been
+wrong if either were false:
+
+- **The admin call sites don't pass a token** (`getGroups()` takes no argument), which is
+  why they worked against an open route. But `lib/api.ts:49` falls back to the persisted
+  session JWT — `const authToken = token ?? readStoredToken()` — so a logged-in admin
+  already sends `Authorization: Bearer …`. No frontend change was needed.
+- **There's no un-hydrated window.** `auth.tsx:67` reads the token in a lazy `useState`
+  initializer during first render, and every group-consuming page sits behind `RequireRole`
+  (`App.tsx:88`), so no component can mount logged-in but token-less.
+
+Three new tests pin the new contract down: an agent can still read both routes (My Group is
+agent-only), and a plain applicant now gets 403.
 
 ---
 
-### ⚠️ 1.3 Benefit eligibility rules are readable with no credentials
+### ⏸️ 1.3 The /api/rule-groups/* routes are unauthenticated  ·  DEFERRED
 
 `src/routes/ruleGroup.route.ts:6-7`
 
@@ -115,23 +131,47 @@ ruleGroupRouter.get("/benefits/:id", getBenefitRuleGroupById);
 ruleGroupRouter.get("/fields/:id", getDynamicRuleGroupById);
 ```
 
-Same shape as 1.2, but the payload is worse: this is the full eligibility rule
-tree for a benefit — every condition, operator, and threshold. Anyone can read
-exactly what income cutoff or age band a benefit checks, for any benefit id.
+**Correction to the first draft of this finding.** It originally said these routes let
+anyone read "exactly what income cutoff or age band a benefit checks." That was wrong, and
+gating them would not change it — a benefit's full rule tree is *already* public by design.
+Checked against the running API:
 
-**Failing tests:** `lookups.test.ts` › "requires authentication",
-`routeContract.test.ts` › "GET /api/rule-groups/… returns 401 without credentials" (×2)
-
-**Fix.**
-
-```ts
-ruleGroupRouter.get("/benefits/:id", mockAuth, requireRole(PERMISSIONS.PARTICIPATE), getBenefitRuleGroupById);
-ruleGroupRouter.get("/fields/:id", mockAuth, requireRole(PERMISSIONS.VIEW_FIELDS), getDynamicRuleGroupById);
+```
+GET /api/benefits/public/<id>  →  200
+  data.eligibilityTree: {"kind":"group","logicalOperator":"ALL","children":[
+    {"kind":"condition","fieldId":"…","conditionFieldValue":"SECRET-THRESHOLD"}]}
 ```
 
-Note the public benefit-detail page already renders eligibility through
-`GET /api/benefits/public/:id` and `/api/field-condition-operators/public`, so
-this router doesn't need a public variant.
+`BenefitDetailsPage.tsx:230` renders it through `ConditionTreeView` so a visitor with no
+account can see what they'd need to qualify for; `fieldLookup.route.ts` even grew a public
+operator endpoint specifically to support that rendering. The finding should have traced the
+frontend before claiming a leak.
+
+**What's actually true:** these two routes are dead code. Nothing calls them —
+
+```
+grep -rn "rule-groups" --include=*.ts --include=*.tsx .    (excluding node_modules)
+→ frontend/src/services/fields.service.ts:201   /api/dynamic-rule-groups/…   ← different router, auth-gated
+→ backend/src/app.ts:38                          the mount itself
+```
+
+`services/ruleGroup.service.ts` is imported by exactly one file, its own controller, and its
+`evaluateBenefitEligibility` is described in `benefitEligibility.service.ts:13` as "an older
+single boolean, never wired to any route." The whole route → controller → service triple was
+superseded by `benefitEligibility.service.ts` for evaluation and the embedded
+`eligibilityTree` for display.
+
+So this is unused, undocumented, unauthenticated surface — not a live leak.
+
+**Still failing (deferred):** `lookups.test.ts` › "requires authentication",
+`routeContract.test.ts` › "GET /api/rule-groups/… returns 401 without credentials" (×2)
+
+**Options when picked back up.** Either delete the triple (routes + controller + service +
+the `app.ts` mount, ~150 lines that read as load-bearing but aren't), or gate them with
+`mockAuth` + `requireRole`. Deleting is cleaner if nothing outside this repo calls them —
+worth checking `backend/routes.md` first, since it documents the API surface. Under the
+delete option the three tests should be rewritten to assert the routes are gone, not just
+deleted, so the removal stays deliberate.
 
 ---
 

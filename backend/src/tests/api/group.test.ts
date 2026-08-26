@@ -25,7 +25,6 @@ describe("GET /api/groups", () => {
   });
 
   it("requires authentication", async () => {
-    // The route is mounted with no mockAuth at all, unlike every other /api/* list.
     const response = await api.get("/api/groups");
 
     assert.equal(
@@ -33,6 +32,16 @@ describe("GET /api/groups", () => {
       401,
       "GET /api/groups is mounted without mockAuth, so the group directory is world-readable",
     );
+  });
+
+  it("is readable by an agent (My Group, the admin Profile page, the benefit form's picker)", async () => {
+    const response = await api.get("/api/groups", ctx.actors.nationalAgent.auth);
+    assert.equal(response.status, 200, response.text.slice(0, 300));
+  });
+
+  it("is not readable by a plain applicant", async () => {
+    const response = await api.get("/api/groups", ctx.actors.user.auth);
+    assert.equal(response.status, 403);
   });
 });
 
@@ -65,6 +74,11 @@ describe("GET /api/groups/:id", () => {
   it("requires authentication", async () => {
     const response = await api.get(`/api/groups/${ctx.refs.groupId}`);
     assert.equal(response.status, 401, "GET /api/groups/:id is mounted without mockAuth");
+  });
+
+  it("is readable by an agent", async () => {
+    const response = await api.get(`/api/groups/${ctx.refs.groupId}`, ctx.actors.nationalAgent.auth);
+    assert.equal(response.status, 200, response.text.slice(0, 300));
   });
 });
 

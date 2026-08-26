@@ -6,6 +6,13 @@ export const PERMISSIONS = {
   MANAGE_USERS: [UserRole.SUPERADMIN],
   MANAGE_GROUPS: [UserRole.SUPERADMIN],
 
+  // Reading the agency directory. Staff-only, matching every consumer: the Groups admin
+  // page, My Group, the admin Profile page, and the group pickers in Create User / Assign
+  // Role / the Benefit form. Nothing applicant-facing needs it — a guest gets a benefit's
+  // owning group embedded in the benefit payload itself (benefit.service.ts's
+  // `benefitGroups: { include: { group: true } }`), not from this route.
+  VIEW_GROUPS: [UserRole.SUPERADMIN, UserRole.AGENT],
+
   // Superadmin and Agent
   CREATE_BENEFITS: [UserRole.SUPERADMIN, UserRole.AGENT],
   EDIT_BENEFITS: [UserRole.SUPERADMIN, UserRole.AGENT],
