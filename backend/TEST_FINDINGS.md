@@ -11,10 +11,10 @@ npm run typecheck:tests   # the suite is excluded from `npm run build`, checked 
 
 ## Status
 
-The first pass found **37 real defects**. Everything not in the authorization group has
-since been **fixed**, and the Severity 1 authorization items are being worked through one
-at a time as decisions are made on each. Every remaining failure is a Severity 1 item still
-marked ⚠️ below.
+The first pass found **37 real defects**, and a later coverage audit found one more (the
+`ANCHOR_TARGET_CANNOT_BE_GLOBAL` 500, below). Everything outside the authorization group is
+**fixed**. Of the seven authorization findings, three are fixed and four are **deferred by
+decision** — the suite's only red tests, so none of them can be quietly lost.
 
 | Group | Finding | Status |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ does, not by how hard it is to fix.
 
 ---
 
-## Severity 1 — Authorization holes  ·  OPEN
+## Severity 1 — Authorization holes  ·  DEFERRED
 
 Each of these is a decision about who should be allowed to do what, and picking wrong in
 either direction has consequences — too tight breaks a real flow, too loose is the hole
