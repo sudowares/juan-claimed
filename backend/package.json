@@ -9,7 +9,9 @@
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "seed": "npx prisma db seed"
+    "seed": "npx prisma db seed",
+    "test": "node --import tsx --test --test-concurrency=1 \"src/tests/api/*.test.ts\"",
+    "test:watch": "node --import tsx --test --watch --test-concurrency=1 \"src/tests/api/*.test.ts\""
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
