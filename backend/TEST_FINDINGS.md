@@ -5,7 +5,7 @@ suite boots the real Express app against a real Postgres seeded from `prisma/see
 talks to it over HTTP, so what it reports is what a client would actually get.
 
 ```bash
-npm test                  # 599 tests across 73 suites
+npm test                  # 730 tests across 82 suites
 npm run typecheck:tests   # the suite is excluded from `npm run build`, checked separately
 ```
 
@@ -18,7 +18,7 @@ marked ⚠️ below.
 
 | Group | Finding | Status |
 | --- | --- | --- |
-| **1** | Authorization holes | 1.2, 1.4, 1.5 fixed · 1.3 deferred · **1.1, 1.6, 1.7 open** |
+| **1** | Authorization holes | 1.2, 1.4, 1.5 fixed · **1.1, 1.3, 1.6, 1.7 deferred by decision** |
 | **1b** | "Answer more" quiz (1b.1 – 1b.3) | Fixed |
 | **2** | Broken for real users (2.1 – 2.7) | Fixed |
 | **3** | API contract / robustness (3.1 – 3.2) | Fixed |
@@ -34,10 +34,14 @@ does, not by how hard it is to fix.
 
 Each of these is a decision about who should be allowed to do what, and picking wrong in
 either direction has consequences — too tight breaks a real flow, too loose is the hole
-itself. So they're being worked through one at a time. ✅ done · ⏸️ deferred by decision ·
-⚠️ still to discuss. Every item still marked ⚠️ or ⏸️ has a failing test waiting for it.
+itself. Three are done (✅); the remaining four are **deferred by decision** (⏸️) to be
+picked up as a group later. Every deferred item keeps its failing test, so none of them can
+be quietly forgotten — they are the only red tests in the suite.
 
-### ⚠️ 1.1 Any signed-in applicant can read the entire staff directory
+Each deferred entry below already carries the analysis and the concrete fix, so picking one
+up is a matter of choosing the policy, not re-doing the investigation.
+
+### ⏸️ 1.1 Any signed-in applicant can read the entire staff directory
 
 `src/routes/user.route.ts:24-25`
 
@@ -244,7 +248,7 @@ reasoning and the two rules.
 
 ---
 
-### ⚠️ 1.6 The public field route leaks Follow-Up fields
+### ⏸️ 1.6 The public field route leaks Follow-Up fields  ·  DEFERRED
 
 `src/routes/field.route.ts:24`
 
@@ -283,7 +287,7 @@ is worth the same look.
 
 ---
 
-### ⚠️ 1.7 An eGovPH-synced GLOBAL field can be deleted
+### ⏸️ 1.7 An eGovPH-synced GLOBAL field can be deleted  ·  DEFERRED
 
 `src/routes/field.route.ts:46`
 
@@ -1086,3 +1090,53 @@ findings are untouched.
 
 - `tsconfig.json` excludes `src/tests` so test files don't land in `dist/`;
   `src/tests/tsconfig.json` + `npm run typecheck:tests` keeps them typechecked.
+
+---
+
+## Unhappy-path and validation coverage
+
+Two test files exist purely to keep the failure surface honest, both driven from an audit
+of the source rather than written by eye.
+
+### `validation.test.ts` — every request-schema rule
+
+105 cases, one per constraint in `src/requests/`: each `min(1)`, `.email()`, `.uuid()`,
+enum, integer/boolean/array type, and every `.refine()`. All pass — the zod layer turned
+out to be genuinely complete, with no gaps to fix.
+
+It also pins three properties of the error body itself: the failing field path appears in
+`error` (so a form can highlight it), *every* failing field is reported rather than just the
+first, and unknown keys are stripped — a client can't smuggle `id` or `deletedAt` through a
+route whose schema doesn't mention them.
+
+The table is safe as static data because `validateBody` runs before the controller on every
+route involved, so a path parameter never has to resolve for the 400 to come back. The one
+middleware that runs *before* `validateBody` (`requireClassificationRoleByFieldIdParam`)
+short-circuits for SUPERADMIN, which is the actor those rows use.
+
+### `errorCodes.test.ts` — the less-travelled service rejections
+
+The route files cover each endpoint's common failures. This one drives the branches nothing
+else reached, so a wrong status mapping — or a branch that can't be reached at all — shows
+up. Coverage went from **41 of 71 error codes asserted to 58**.
+
+It found one real bug, now fixed: **`ANCHOR_TARGET_CANNOT_BE_GLOBAL` was returning 500.**
+`field.service.ts:183` throws it deliberately, with its own message, to stop a Follow-Up
+field being anchored to a Global one (which used to silently promote it to Global and
+bypass the eGovPH lock). Its four sibling `ANCHOR_*` codes are all mapped to 400 in
+`field.controller.ts`; this one was missed, so the guard worked but the admin got "An
+unexpected error occurred on the server" with no way to know what they'd done wrong. Same
+class as 2.3. Now a 400 naming the rule.
+
+### The 13 codes still unasserted, and why
+
+| Code | Why not |
+| --- | --- |
+| `SCOPE_NOT_FOUND`, `UNAUTHORIZED_SCOPE`, `DUPLICATE_ENTRY` | Reachable only through the PSGC lookup path, which needs `psgc.gitlab.io` — blocked in this environment. |
+| `SERVER_ERROR` | The generic catch-all; asserting it would just pin the absence of a specific mapping. |
+| `INVALID_REFERENCE` | The Prisma `P2003` backstop added for 2.4. Unreachable now that `assertGroupsExist` validates ids first — which is the point of it. |
+| `LAST_SUPERADMIN_PROTECTED` | Unreachable given the self-check, as 1.4 documents. Kept as a backstop. |
+| `UNSUPPORTED_INPUT_TYPE` | Defensive branch over the seeded input-type enum. |
+| `BLOB_TOKEN_ERROR` | Needs a real `BLOB_READ_WRITE_TOKEN`. |
+| `PARENT_NODE_NOT_FOUND` | Hierarchy nodes are submitted nested under `children`; no request schema accepts a `parentNodeId`, so this looks unreachable over HTTP. Worth confirming before trusting that. |
+| `ANCHOR_CYCLE_DETECTED`, `ANCHORED_CHILD_NOT_FOUND`, `INVALID_TRIGGER_OPTION_REFERENCE`, `CONDITION_TREE_IN_USE_BY_BENEFIT` | Genuinely reachable, but each needs an elaborate multi-step fixture (anchored children with their own condition trees, or a benefit rule bound to a field's tree). **Not yet written** — the honest gap in this pass. |

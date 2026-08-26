@@ -121,6 +121,13 @@ const mapCompositeFieldError = (res: Response, error: any, action: "create" | "u
     return res.status(400).json({ success: false, message, error: "Anchoring here would create a circular dependency.", errorCode: error.message, data: null });
   }
 
+  // Was missing while its four sibling ANCHOR_* codes were all mapped, so a deliberate,
+  // explainable authoring rejection came back as a 500 "An unexpected error occurred on the
+  // server" — the guard worked, but the admin had no way to know what they'd done wrong.
+  if (error.message === "ANCHOR_TARGET_CANNOT_BE_GLOBAL") {
+    return res.status(400).json({ success: false, message, error: "A Follow-Up field can't be anchored to a Global field — Global fields are eGovPH-synced and locked.", errorCode: error.message, data: null });
+  }
+
   if (error.message === "INVALID_TRIGGER_OPTION_REFERENCE") {
     return res.status(400).json({ success: false, message, error: "A conditional child's trigger value references an option that wasn't submitted.", errorCode: error.message, data: null });
   }
