@@ -1,0 +1,12 @@
+// The main tsconfig.json excludes src/tests so test files never land in dist/. This config
+// keeps them typechecked anyway: `npm run typecheck:tests`.
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts", "../**/*.ts"],
+  "exclude": ["../../node_modules", "../../dist"]
+}

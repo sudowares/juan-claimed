@@ -171,6 +171,29 @@ export const assertUserAuthorizedForBenefit = async (
  * effectively modifying the benefit. Throws BENEFIT_NOT_FOUND / FORBIDDEN /
  * INVALID_PSGC_CODE / SCOPE_NOT_FOUND on failure.
  */
+/**
+ * Fetches an active benefit by id for a READ. Existence only — no jurisdiction check.
+ *
+ * The list endpoints for a benefit's requirements/utilizations/how-to-applies/attachments
+ * used to call assertUserCanModifyBenefit, which for a nationwide benefit throws unless the
+ * caller's scope is NATIONAL or SUPERADMIN. A role USER has no scope at all, so every
+ * applicant got a 403 reading what documents a benefit needs — even though those routes are
+ * mounted with requireRole(PERMISSIONS.PARTICIPATE), which explicitly includes USER. The
+ * route layer granted access and the service layer took it back.
+ *
+ * Writes still go through assertUserCanModifyBenefit: modifying a benefit's children is
+ * modifying the benefit, and that stays jurisdiction-scoped.
+ */
+export const assertBenefitReadable = async (benefitId: string, db: Db = prisma) => {
+  const benefit = await db.fctBenefit.findFirst({
+    where: { id: benefitId, deletedAt: null },
+    include: { benefitPsgcCodes: { where: { deletedAt: null } } },
+  });
+  if (!benefit) throw new Error("BENEFIT_NOT_FOUND");
+
+  return benefit;
+};
+
 export const assertUserCanModifyBenefit = async (
   benefitId: string,
   user: any,

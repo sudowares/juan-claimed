@@ -15,7 +15,17 @@ export const getFieldOptionsByFieldId = async (req: Request<{ fieldId: string }>
       errorCode: null,
       data: options
     });
-  } catch (error) {
+  } catch (error: any) {
+    if (error.message === "FIELD_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Unable to load field options.",
+        error: "The requested field does not exist.",
+        errorCode: error.message,
+        data: null
+      });
+    }
+
     console.error("[FieldOptionsController] Error fetching field options:", error);
     return res.status(500).json({
       success: false,

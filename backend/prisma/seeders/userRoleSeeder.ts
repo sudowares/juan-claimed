@@ -72,9 +72,22 @@ export async function seedUsersAndRoles() {
   console.log("Seeding Users according to role constraints...");
 
   // A. Superadmin Account (Scope: Superadmin, Group: eGovPH, PsgcCode: Superadmin)
+  // Every identity column is repeated in `update`, not just a couple: this seeder is
+  // treated as the way to restore a known-good state, but patching only a subset meant a
+  // re-run could NOT repair an account whose role/scope/psgcCode had been changed (which is
+  // exactly the situation you re-run it in).
   await prisma.dimUser.upsert({
     where: { email: "superadmin@juanclaimed.com" },
-    update: { username: "superadmin", groupId: egovGroup.id, passHash: devPassHash },
+    update: {
+      username: "superadmin",
+      role: UserRole.SUPERADMIN,
+      scopeId: createdScopes["SUPERADMIN"],
+      groupId: egovGroup.id,
+      psgcCode: "SUPERADMIN",
+      active: true,
+      deletedAt: null,
+      passHash: devPassHash,
+    },
     create: {
       username: "superadmin",
       email: "superadmin@juanclaimed.com",
@@ -91,7 +104,16 @@ export async function seedUsersAndRoles() {
   // B. National Agent Account (Scope: National, Group: NOT NULL, PsgcCode: NULL)
   await prisma.dimUser.upsert({
     where: { email: "agent.doh@juanclaimed.com" },
-    update: { passHash: devPassHash },
+    update: {
+      username: "agent_national_doh",
+      role: UserRole.AGENT,
+      scopeId: createdScopes["NATIONAL"],
+      groupId: dohGroup.id,
+      psgcCode: null,
+      active: true,
+      deletedAt: null,
+      passHash: devPassHash,
+    },
     create: {
       username: "agent_national_doh",
       email: "agent.doh@juanclaimed.com",
@@ -108,7 +130,16 @@ export async function seedUsersAndRoles() {
   // C. Provincial Agent Account (Scope: Province, Group: NULL, PsgcCode: NOT NULL)
   await prisma.dimUser.upsert({
     where: { email: "agent.cavite@juanclaimed.com" },
-    update: { passHash: devPassHash },
+    update: {
+      username: "agent_prov_cavite",
+      role: UserRole.AGENT,
+      scopeId: createdScopes["PROVINCES"],
+      groupId: null,
+      psgcCode: "012800000",
+      active: true,
+      deletedAt: null,
+      passHash: devPassHash,
+    },
     create: {
       username: "agent_prov_cavite",
       email: "agent.cavite@juanclaimed.com",

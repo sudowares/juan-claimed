@@ -48,6 +48,21 @@ const mapFieldAnswerError = (res: Response, error: any, message: string) => {
     return res.status(400).json({ success: false, message, error: "The submitted value does not meet this field's requirements (length, range, pattern, or selection count).", errorCode: error.message, data: null });
   }
 
+  // "INVALID_INPUT: <detail>" — the services throw this with a message already written for
+  // the applicant (e.g. createAnswerGroup's "This field allows at most 2 rows."). Without
+  // this branch it fell through to the generic 500 and that message was replaced with
+  // "An unexpected error occurred on the server."
+  if (typeof error.message === "string" && error.message.startsWith("INVALID_INPUT")) {
+    const [, ...rest] = error.message.split(": ");
+    return res.status(400).json({
+      success: false,
+      message,
+      error: rest.join(": ") || "The request could not be processed.",
+      errorCode: "INVALID_INPUT",
+      data: null,
+    });
+  }
+
   return null;
 };
 

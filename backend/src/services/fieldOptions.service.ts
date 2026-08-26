@@ -103,20 +103,24 @@ const fetchSchoolBackedOptions = async (fieldId: string) => {
 export const fetchFieldOptions = async (fieldId: string) => {
   const field = await prisma.dimField.findUnique({
     where: { id: fieldId },
-    select: { englishName: true, _count: { select: { countries: true, schools: true } } },
+    select: { englishName: true, deletedAt: true, _count: { select: { countries: true, schools: true } } },
   });
+
+  // An unknown fieldId used to return 200 with [], so a typo'd or stale id was
+  // indistinguishable from "this field genuinely has no options yet".
+  if (!field || field.deletedAt) throw new Error("FIELD_NOT_FOUND");
 
   // The real DimField<->DimCountries relation is the source of truth for "is this field
   // country-backed at all" (survives a rename, unlike a pure string match would) — only
   // englishName still decides WHICH column to project, since both consumer fields share
   // the exact same 249 connected rows.
-  if (field && field._count.countries > 0) {
+  if (field._count.countries > 0) {
     const normalizedName = toSnakeCaseKey(field.englishName);
     const kind = normalizedName === "NATIONALITY" ? "NATIONALITY" : "COUNTRY";
     return fetchCountryBackedOptions(fieldId, kind);
   }
 
-  if (field && field._count.schools > 0) {
+  if (field._count.schools > 0) {
     return fetchSchoolBackedOptions(fieldId);
   }
 

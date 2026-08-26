@@ -143,10 +143,26 @@ export const loadActors = async (): Promise<Actors> => {
   };
 };
 
+/** The input types fieldConfigSeeder always seeds. */
+const INPUT_TYPE_VALUES = [
+  "TEXT", "NUMBER", "MONEY", "DATE", "DURATION",
+  "BOOLEAN", "SINGLE_SELECT", "MULTI_SELECT", "HIERARCHY_SELECT", "REPEATER_GROUP",
+] as const;
+export type InputTypeValue = (typeof INPUT_TYPE_VALUES)[number];
+
+/** The scopes userRoleSeeder always seeds. */
+const SCOPE_VALUES = [
+  "SUPERADMIN", "NATIONAL", "REGIONS", "PROVINCES",
+  "DISTRICTS", "CITIES-MUNICIPALITIES", "BARANGAYS",
+] as const;
+export type ScopeValue = (typeof SCOPE_VALUES)[number];
+
 export type References = {
-  inputTypes: Record<string, string>;
+  // Full mapped types rather than Record<string, string> so `refs.inputTypes.TEXT` is a
+  // plain string under noUncheckedIndexedAccess; loadReferences asserts every key is present.
+  inputTypes: Record<InputTypeValue, string>;
   /** DimScope.value -> id */
-  scopes: Record<string, string>;
+  scopes: Record<ScopeValue, string>;
   /** A seeded group id, for role/benefit payloads that need one. */
   groupId: string;
   /** A seeded GLOBAL field, safe to read but never mutated by the suite. */
@@ -164,9 +180,21 @@ export const loadReferences = async (): Promise<References> => {
   if (!group) throw new Error("Test setup: no seeded DimGroup found.");
   if (!globalField) throw new Error("Test setup: no seeded GLOBAL DimField found.");
 
+  const inputTypes = Object.fromEntries(inputTypeRows.map((t) => [t.value, t.id])) as Record<InputTypeValue, string>;
+  const scopes = Object.fromEntries(scopeRows.map((s) => [s.value, s.id])) as Record<ScopeValue, string>;
+
+  // The casts above are only sound if the seed really did produce every key the tests index.
+  const missingInputTypes = INPUT_TYPE_VALUES.filter((value) => !inputTypes[value]);
+  const missingScopes = SCOPE_VALUES.filter((value) => !scopes[value]);
+  if (missingInputTypes.length || missingScopes.length) {
+    throw new Error(
+      `Test setup: seed is incomplete — missing input types [${missingInputTypes}], scopes [${missingScopes}]. Run \`npx tsx prisma/seed.ts\`.`,
+    );
+  }
+
   return {
-    inputTypes: Object.fromEntries(inputTypeRows.map((t) => [t.value, t.id])),
-    scopes: Object.fromEntries(scopeRows.map((s) => [s.value, s.id])),
+    inputTypes,
+    scopes,
     groupId: group.id,
     globalField: {
       id: globalField.id,

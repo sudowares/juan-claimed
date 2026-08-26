@@ -167,6 +167,16 @@ export const getFieldBenefitBindings = async (req: Request<{ id: string }>, res:
     const benefits = await fieldService.getFieldBenefitBindings(req.params.id);
     return res.status(200).json({ success: true, message: "OK", error: null, errorCode: null, data: benefits });
   } catch (error: any) {
+    if (error.message === "FIELD_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Could not fetch benefit bindings.",
+        error: "The requested field does not exist.",
+        errorCode: error.message,
+        data: null,
+      });
+    }
+
     console.error("[FieldController] Error fetching field benefit bindings:", error);
     return res.status(500).json({
       success: false,

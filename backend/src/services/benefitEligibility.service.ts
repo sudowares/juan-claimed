@@ -125,6 +125,71 @@ const computeSettledHiddenFieldIds = async (
   return hidden;
 };
 
+// Every field the applicant must be able to SEE in order to answer the given ones — each
+// referenced field plus, transitively, whatever its OWN show/hide condition reads.
+//
+// unansweredFieldIds used to be built from the benefit tree's leaf references alone, which
+// is what "Answer More" then tries to render. But a referenced field is frequently gated by
+// its own dynamicCondition on a DIFFERENT field — that's exactly what the admin UI's "Anchor
+// to"/"Children Dependents" produces, and an anchored child is required to carry such a
+// condition (field.service.ts's assertAnchorFieldValid). The driver field is referenced by no
+// benefit, so it never entered the list; the frontend's renderableFields/isFieldVisible then
+// dropped the gated question for having an unanswered dependency, and the applicant got a
+// benefit listed under "Almost there" with an empty form and no way to progress. Transitive
+// because a driver can itself be gated.
+const expandWithVisibilityDeps = async (db: DbClient, fieldIds: Set<string>): Promise<Set<string>> => {
+  const askable = new Set(fieldIds);
+  let frontier = [...fieldIds];
+
+  while (frontier.length > 0) {
+    const trees = await fetchDynamicRuleGroupTreesForFieldsWith(db, frontier);
+    const next: string[] = [];
+
+    for (const tree of trees.values()) {
+      if (!tree) continue;
+      for (const dependencyFieldId of collectReferencedFieldIds(tree as ClientRuleTreeRoot)) {
+        if (askable.has(dependencyFieldId)) continue;
+        askable.add(dependencyFieldId);
+        next.push(dependencyFieldId);
+      }
+    }
+
+    frontier = next;
+  }
+
+  return askable;
+};
+
+// A REPEATER_GROUP's row column (parentFieldId set) has no answer of its own outside a row —
+// submitting one standalone fails fieldAnswer.service.ts's ANSWER_GROUP_REQUIRED check, which
+// would fail the applicant's WHOLE "Answer More" save, not just that field. New references are
+// rejected at authoring time (benefitRuleGroup.service.ts), but rules saved before that check
+// existed still resolve here, so never hand one to the quiz.
+const withoutRepeaterSubfields = async (db: DbClient, fieldIds: string[]): Promise<string[]> => {
+  if (fieldIds.length === 0) return fieldIds;
+
+  const subfields = await db.dimField.findMany({
+    where: { id: { in: fieldIds }, parentFieldId: { not: null } },
+    select: { id: true },
+  });
+  if (subfields.length === 0) return fieldIds;
+
+  const excluded = new Set(subfields.map((f) => f.id));
+  return fieldIds.filter((id) => !excluded.has(id));
+};
+
+/**
+ * The list "Answer More" renders from: every still-unanswered field this benefit needs,
+ * closed over show/hide dependencies so each one can actually be displayed, and with
+ * repeater row-columns removed so the page's bulk save can't be poisoned by one.
+ */
+const resolveAskableUnanswered = async (
+  db: DbClient,
+  treeFieldIds: Set<string>,
+  answers: Record<string, unknown>,
+  hiddenFieldIds: Set<string>,
+): Promise<string[]> => withoutRepeaterSubfields(db, unansweredOf(treeFieldIds, answers, hiddenFieldIds));
+
 // Combines a list of child results under ALL (AND) or ANY (OR) semantics, short-circuiting
 // exactly like condition.util.ts's own boolean logic would, but preserving the third
 // "still unknown" state and only surfacing pendingFieldIds from the branches that actually
@@ -355,11 +420,14 @@ export const evaluateBenefitEligibilityWith = async (
     if (rows.length > 0) answers[repeaterFieldId] = rows;
   }
 
-  const hidden = await computeSettledHiddenFieldIds(db, fieldIds, answers);
+  // Closed over show/hide dependencies BEFORE settling hidden fields, so a driver that is
+  // itself definitively hidden is excluded from the quiz too.
+  const askableFieldIds = await expandWithVisibilityDeps(db, fieldIds);
+  const hidden = await computeSettledHiddenFieldIds(db, askableFieldIds, answers);
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: withResidency(residency.pendingFieldIds, await resolveAskableUnanswered(db, askableFieldIds, answers, hidden)) };
 };
 
 export const evaluateBenefitEligibility = async (benefit: BenefitForEligibility, userId: string): Promise<BenefitEligibilityResult> => {
@@ -438,7 +506,8 @@ export const evaluateBenefitEligibilityDetailById = async (benefitId: string, us
     if (rows.length > 0) answers[repeaterFieldId] = rows;
   }
 
-  const hidden = await computeSettledHiddenFieldIds(prisma, fieldIds, answers);
+  const askableFieldIds = await expandWithVisibilityDeps(prisma, fieldIds);
+  const hidden = await computeSettledHiddenFieldIds(prisma, askableFieldIds, answers);
   const rawLeaves: { fieldId: string; status: EligibilityStatus }[] = [];
   collectLeafStatuses(tree, answers, fieldMap, operatorMap, hidden, rawLeaves);
   for (const leaf of rawLeaves) {
@@ -448,7 +517,7 @@ export const evaluateBenefitEligibilityDetailById = async (benefitId: string, us
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: withResidency(residency.pendingFieldIds, await resolveAskableUnanswered(prisma, askableFieldIds, answers, hidden)) };
 };
 
 // --- Guest evaluation ("public/no account" flow) ---------------------------------------
@@ -530,11 +599,14 @@ async function evaluateBenefitEligibilityForAnswersWith(
 
   const answers = { ...baseAnswers, ...(source.repeaterRows ?? {}) };
 
-  const hidden = await computeSettledHiddenFieldIds(db, fieldIds, answers);
+  // Closed over show/hide dependencies BEFORE settling hidden fields, so a driver that is
+  // itself definitively hidden is excluded from the quiz too.
+  const askableFieldIds = await expandWithVisibilityDeps(db, fieldIds);
+  const hidden = await computeSettledHiddenFieldIds(db, askableFieldIds, answers);
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
+  return { benefitId: benefit.id, ...combined, unansweredFieldIds: withResidency(residency.pendingFieldIds, await resolveAskableUnanswered(db, askableFieldIds, answers, hidden)) };
 }
 
 export const evaluateAllBenefitsEligibilityForAnswers = async (source: GuestAnswerSource): Promise<BenefitEligibilityResult[]> => {
@@ -581,7 +653,8 @@ export const evaluateBenefitEligibilityDetailForAnswers = async (benefitId: stri
 
   const answers = { ...baseAnswers, ...(source.repeaterRows ?? {}) };
 
-  const hidden = await computeSettledHiddenFieldIds(prisma, fieldIds, answers);
+  const askableFieldIds = await expandWithVisibilityDeps(prisma, fieldIds);
+  const hidden = await computeSettledHiddenFieldIds(prisma, askableFieldIds, answers);
   const rawLeaves: { fieldId: string; status: EligibilityStatus }[] = [];
   collectLeafStatuses(tree, answers, fieldMap, operatorMap, hidden, rawLeaves);
   for (const leaf of rawLeaves) {
@@ -591,5 +664,5 @@ export const evaluateBenefitEligibilityDetailForAnswers = async (benefitId: stri
   const treeResult = evaluateTreeNode(tree, answers, fieldMap, operatorMap, hidden);
   const combined = combine("ALL", [residency, treeResult]);
 
-  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(fieldIds, answers, hidden)) };
+  return { benefitId: benefit.id, ...combined, leaves, unansweredFieldIds: withResidency(residency.pendingFieldIds, await resolveAskableUnanswered(prisma, askableFieldIds, answers, hidden)) };
 };

@@ -106,7 +106,11 @@ export const makeAttachmentControllers = (
         req.params.attachmentId,
         req.user,
       );
-      return sendSuccess(res, 200, "Attachment deleted successfully.", result);
+      // serializeAttachment, same as list/create/edit above: deleteParentAttachment returns
+      // the full updated row, whose fileSize is a BigInt that JSON.stringify throws on. That
+      // threw AFTER the soft-delete had already committed, so the UI showed a 500 for a
+      // delete that actually succeeded.
+      return sendSuccess(res, 200, "Attachment deleted successfully.", serializeAttachment(result));
     } catch (error: any) {
       handleApiError(error, res);
     }

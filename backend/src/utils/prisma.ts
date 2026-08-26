@@ -1,5 +1,17 @@
+// DATABASE_URL is read at module-evaluation time just below, so .env has to be loaded
+// before this module is imported — not after. app.ts happens to do that (`import
+// "dotenv/config"` is its first import), but anything that imports this module WITHOUT
+// going through app.ts doesn't: `npx tsx prisma/seed.ts` failed with Prisma's
+// `P1010 DatabaseAccessDenied` (an undefined connection string makes pg fall back to its
+// own defaults) rather than anything naming the real problem. Loading it here makes the
+// module self-sufficient regardless of who imports it first.
+import "dotenv/config";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "../generated/prisma/client.js";
+
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is not set — the database cannot be reached. Set it in backend/.env (see .env.example).");
+}
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 

@@ -169,8 +169,28 @@ export const getBenefitById = async (id: string) => {
   };
 };
 
+// groupIds arrive straight from the request body. Left unchecked, an id that matches no
+// DimGroup only failed at the nested `benefitGroups: { create: ... }` write, as a Prisma
+// foreign-key violation — surfaced as a 500 whose body echoed Prisma's rendered error,
+// source lines from this file included. A group that doesn't exist is a client mistake.
+const assertGroupsExist = async (groupIds: string[], db: Db) => {
+  if (groupIds.length === 0) return;
+
+  const found = await db.dimGroup.findMany({
+    where: { id: { in: groupIds }, deletedAt: null },
+    select: { id: true },
+  });
+  if (found.length === groupIds.length) return;
+
+  const known = new Set(found.map((g) => g.id));
+  const missing = groupIds.filter((id) => !known.has(id));
+  throw new Error(`INVALID_INPUT: The following groupIds do not exist: ${missing.join(", ")}.`);
+};
+
 export const createBenefit = async (data: any, user: any, db: Db = prisma) => {
   const { isNationwide, incomingCodes, groupIds, creatorGroupId } = validateBenefitInput(data, user);
+
+  await assertGroupsExist(groupIds, db);
 
   // Skipped entirely for nationwide benefits — no location rows needed.
   const resolvedCodes = isNationwide
@@ -230,6 +250,8 @@ const runEditBenefit = async (
 ) => {
   const { isNationwide, incomingCodes, groupIds: desiredGroupIds, creatorGroupId } =
     validateBenefitInput(data, user);
+
+  await assertGroupsExist(desiredGroupIds, db);
 
   const resolvedCodes = isNationwide
     ? []

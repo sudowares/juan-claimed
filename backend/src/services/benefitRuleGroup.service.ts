@@ -105,6 +105,17 @@ const buildBenefitRuleTree = async (
     console.error(`[BenefitRuleGroupService] Field condition operator "${node.fieldConditionOperatorId}" does not exist.`);
     throw new Error("OPERATOR_NOT_FOUND");
   }
+  // A REPEATER_GROUP's row column has no answer of its own outside a row, so it can't be
+  // compared as a scalar here — the repeater FIELD is the conditionable one (via its own
+  // ANY_MATCH/COUNT_*/SUM_* operators, which read across the rows). Allowing a subfield
+  // reference also broke "Answer More" downstream: its id reached the quiz, got rendered as
+  // a standalone question, and was then submitted with no repeaterGroupId — failing the
+  // applicant's entire save with ANSWER_GROUP_REQUIRED.
+  if (field.parentFieldId) {
+    console.error(`[BenefitRuleGroupService] Condition field "${node.fieldId}" is a repeater subfield and cannot be conditioned on directly.`);
+    throw new Error("CONDITION_FIELD_IS_REPEATER_SUBFIELD");
+  }
+
   // Same authoring-time guard as fieldRuleGroup.service.ts's buildDynamicRuleTree — catches
   // e.g. an AGE_LESS_THAN (DATE) operator configured onto a TEXT field.
   if (operator.fieldInputTypeId !== field.fieldInputTypeId) {

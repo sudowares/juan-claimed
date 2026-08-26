@@ -1,25 +1,43 @@
 # API route test findings
 
-Every route mounted in `src/app.ts` now has an integration test under
-`src/tests/api/`. The suite boots the real Express app against a real Postgres
-seeded from `prisma/seed.ts` and talks to it over HTTP, so what it reports is
-what a client would actually get.
+Every route mounted in `src/app.ts` has an integration test under `src/tests/api/`. The
+suite boots the real Express app against a real Postgres seeded from `prisma/seed.ts` and
+talks to it over HTTP, so what it reports is what a client would actually get.
 
 ```bash
-npm test          # 593 tests across 73 suites
+npm test                  # 593 tests across 73 suites
+npm run typecheck:tests   # the suite is excluded from `npm run build`, checked separately
 ```
 
-**Result: 555 pass, 37 fail, 1 skipped.** Every one of the 37 failures is a
-real defect in the API, not a broken test — the failing assertions are listed
-below with a fix for each. The suite is red on purpose: it's the to-do list.
+## Status
 
-Ordering is by how much damage each one does, not by how hard it is to fix.
+The first pass found **37 real defects**. Everything not in the authorization group has
+since been **fixed**; the suite is now **579 pass, 13 fail, 1 skipped**, and all 13
+remaining failures are the Severity 1 items below, left open deliberately because each one
+is a policy decision rather than a bug with an obvious right answer.
+
+| Group | Finding | Status |
+| --- | --- | --- |
+| **1** | Authorization holes (1.1 – 1.7) | **Open** — 13 failing tests |
+| **1b** | "Answer more" quiz (1b.1 – 1b.3) | Fixed |
+| **2** | Broken for real users (2.1 – 2.7) | Fixed |
+| **3** | API contract / robustness (3.1 – 3.2) | Fixed |
+| **4** | Observations (4.1 – 4.4, 4.6) | Fixed |
+
+Each fixed section below keeps its original description — what the bug was and why it
+mattered — followed by what actually changed. Ordering is by how much damage each one
+does, not by how hard it is to fix.
 
 ---
 
-## Severity 1 — Authorization holes
+## Severity 1 — Authorization holes  ·  OPEN
 
-### 1.1 Any signed-in applicant can read the entire staff directory
+Left for you to review. Every one of these is a decision about who should be allowed to
+do what, and picking wrong in either direction has consequences — too tight breaks a
+real flow, too loose is the hole itself. The fix for each is written out below and all
+seven have a failing test waiting.
+
+### ⚠️ 1.1 Any signed-in applicant can read the entire staff directory
 
 `src/routes/user.route.ts:24-25`
 
@@ -56,7 +74,7 @@ If a `USER` genuinely needs to read their own record, that's what
 
 ---
 
-### 1.2 The group directory is world-readable
+### ⚠️ 1.2 The group directory is world-readable
 
 `src/routes/group.route.ts:16-17`
 
@@ -88,7 +106,7 @@ the main ones open.
 
 ---
 
-### 1.3 Benefit eligibility rules are readable with no credentials
+### ⚠️ 1.3 Benefit eligibility rules are readable with no credentials
 
 `src/routes/ruleGroup.route.ts:6-7`
 
@@ -117,7 +135,7 @@ this router doesn't need a public variant.
 
 ---
 
-### 1.4 A superadmin can demote themselves and lock everyone out
+### ⚠️ 1.4 A superadmin can demote themselves and lock everyone out
 
 `src/services/user.service.ts:29` (`assignUserRole`)
 
@@ -158,7 +176,7 @@ and map both codes to 403 in `user.controller.ts` alongside the existing
 
 ---
 
-### 1.5 A superadmin account can be deleted
+### ⚠️ 1.5 A superadmin account can be deleted
 
 `src/services/user.service.ts:132` (`deleteUser`)
 
@@ -187,7 +205,7 @@ branch that `setUserActive` already has.
 
 ---
 
-### 1.6 The public field route leaks Follow-Up fields
+### ⚠️ 1.6 The public field route leaks Follow-Up fields
 
 `src/routes/field.route.ts:24`
 
@@ -226,7 +244,7 @@ is worth the same look.
 
 ---
 
-### 1.7 An eGovPH-synced GLOBAL field can be deleted
+### ⚠️ 1.7 An eGovPH-synced GLOBAL field can be deleted
 
 `src/routes/field.route.ts:46`
 
@@ -263,7 +281,7 @@ export const requireDeletableClassification = async (req: Request<{ id: string }
 
 ---
 
-## Severity 1b — The "Answer more" follow-up quiz
+## Severity 1b — The "Answer more" follow-up quiz  ·  FIXED
 
 Tested in `src/tests/api/answerMoreQuiz.test.ts`, which drives the exact sequence
 `AnswerMorePage.tsx` performs: catalog → guest eligibility → union
@@ -274,7 +292,7 @@ The reported symptom — *"it shows I'm eligible for these benefits and yet the
 questions to answer for those are not showing"* — reproduces, and has one
 dominant cause.
 
-### 1b.1 A question gated on another question is asked for, but can never be shown
+### ✅ 1b.1 A question gated on another question is asked for, but can never be shown
 
 `src/services/benefitEligibility.service.ts:42` (`collectLeafRefs`) →
 `:57` (`unansweredOf`)
@@ -331,7 +349,7 @@ some questions can never be displayed — their show/hide driver is neither answ
 + [ 'ZZTEST Field mta7or389q5lm needs ZZTEST Field mta7or22ko93b' ]
 ```
 
-**Fix.** Close `unansweredFieldIds` over each field's visibility dependencies —
+**Fixed.** Close `unansweredFieldIds` over each field's visibility dependencies —
 transitively, since a driver can itself be gated. In
 `benefitEligibility.service.ts`, alongside the existing
 `computeSettledHiddenFieldIds` (which already fetches exactly these trees):
@@ -385,7 +403,7 @@ passing tests:
   The expansion adds fields to ask about; it doesn't change any status.
 - Once every asked-for question is answered, the benefit resolves — no loop.
 
-### 1b.2 A repeater subfield gets asked for, and submitting it fails the whole save
+### ✅ 1b.2 A repeater subfield gets asked for, and submitting it fails the whole save
 
 A benefit's eligibility tree can reference a **subfield of a REPEATER_GROUP**
 (one of the row columns) — nothing rejects that at authoring time. Its id then
@@ -410,10 +428,10 @@ The comment above that block says "REPEATER_GROUP is never referenced as a scala
 condition field, so nothing repeater-shaped leaks in" — true of the repeater
 field itself, but its subfields aren't covered.
 
-**Failing test:** `answerMoreQuiz.test.ts` › "does not ask for a repeater
+**Was failing:** `answerMoreQuiz.test.ts` › "does not ask for a repeater
 subfield the page cannot submit"
 
-**Fix.** Two changes, both worth making:
+**Fixed.** Two changes, both worth making:
 
 1. Reject the reference at authoring time, where the error is actionable. In
    `benefitRuleGroup.service.ts`'s tree validation, alongside the existing
@@ -437,7 +455,7 @@ subfield the page cannot submit"
    );
    ```
 
-### 1b.3 A benefit missing from the eligibility response is silently shown as a candidate
+### ✅ 1b.3 A benefit missing from the eligibility response is silently shown as a candidate
 
 `frontend/src/services/benefits.service.ts:54-57`
 
@@ -458,7 +476,7 @@ the test asserting parity **passes**, and is there to keep it that way. But the
 default is still wrong: an absent row means "we don't know", not "you might
 qualify".
 
-**Fix.** Default to something that can't masquerade as a candidate, and say so:
+**Fixed.** Default to something that can't masquerade as a candidate, and say so:
 
 ```ts
 const result = byBenefitId.get(benefit.id);
@@ -480,9 +498,9 @@ return { benefit, status: result?.status ?? "NOT_ELIGIBLE", pendingFieldIds: [],
 
 ---
 
-## Severity 2 — Broken for real users
+## Severity 2 — Broken for real users  ·  FIXED
 
-### 2.1 Applicants can't read a benefit's requirements, utilizations, or how-to-apply
+### ✅ 2.1 Applicants can't read a benefit's requirements, utilizations, or how-to-apply
 
 `src/services/benefitRequirement.service.ts:8`,
 `benefitUtilization.service.ts:8`, `benefitHowToApply.service.ts`,
@@ -507,10 +525,10 @@ explicitly includes `USER` — so the route layer grants access and the service
 layer takes it away. The benefit detail page can't show applicants what
 documents they need to bring.
 
-**Failing tests:** `benefitChildren.test.ts` › "is readable by a plain user"
+**Were failing:** `benefitChildren.test.ts` › "is readable by a plain user"
 (×3), `benefitAttachment.test.ts` › "is readable by a plain user" (×3)
 
-**Fix.** Split the assertion by intent. Reads should confirm the benefit exists
+**Fixed.** Split the assertion by intent. Reads should confirm the benefit exists
 and is visible; only writes need the jurisdiction check:
 
 ```ts
@@ -532,7 +550,7 @@ these routes, since the read path now 404s on a missing benefit instead of
 
 ---
 
-### 2.2 Deleting an attachment returns 500 — after deleting it
+### ✅ 2.2 Deleting an attachment returns 500 — after deleting it
 
 `src/controllers/benefitAttachment.controller.ts:99-110`
 
@@ -555,9 +573,9 @@ The 500 body is also mangled: `handleApiError` splits `error.message` on `": "`
 to derive an `errorCode`, so this responds with
 `errorCode: "Do not know how to serialize a BigInt"`.
 
-**Failing test:** `benefitAttachment.test.ts` › "deletes an attachment" (×3)
+**Was failing:** `benefitAttachment.test.ts` › "deletes an attachment" (×3)
 
-**Fix.** Either serialize like its siblings:
+**Fixed.** Either serialize like its siblings:
 
 ```ts
 return sendSuccess(res, 200, "Attachment deleted successfully.", serializeAttachment(result));
@@ -568,7 +586,7 @@ needs. Serializing is the smaller change and keeps the four handlers symmetric.
 
 ---
 
-### 2.3 Hitting a repeater's row cap returns 500
+### ✅ 2.3 Hitting a repeater's row cap returns 500
 
 `src/services/fieldAnswer.service.ts:363` throws
 `INVALID_INPUT: This field allows at most N rows.` — a deliberate,
@@ -577,9 +595,9 @@ user-facing message. `src/controllers/fieldAnswer.controller.ts`'s
 so it falls through to the generic 500 and the message is replaced with
 "An unexpected error occurred on the server."
 
-**Failing test:** `fieldAnswer.test.ts` › "enforces the configured maxRows cap"
+**Was failing:** `fieldAnswer.test.ts` › "enforces the configured maxRows cap"
 
-**Fix.** Add the branch, preserving the detail the service went to the trouble
+**Fixed.** Add the branch, preserving the detail the service went to the trouble
 of writing:
 
 ```ts
@@ -595,7 +613,7 @@ if (error.message?.startsWith("INVALID_INPUT")) {
 
 ---
 
-### 2.4 An unknown `groupId` on benefit create returns 500 with a Prisma stack trace
+### ✅ 2.4 An unknown `groupId` on benefit create returns 500 with a Prisma stack trace
 
 `POST /api/benefits` with `groupIds: ["<not-a-real-id>"]` reaches
 `db.fctBenefit.create` with a nested `dimBenefitGroup` write and dies on a
@@ -609,10 +627,10 @@ source lines from `benefit.service.ts`:
 Two problems: a client mistake is reported as a server error, and internal
 source is echoed to the caller.
 
-**Failing test:** `benefit.test.ts` › "rejects an unknown groupId with 400/404
+**Was failing:** `benefit.test.ts` › "rejects an unknown groupId with 400/404
 rather than 500"
 
-**Fix.** Validate group ids alongside the PSGC codes in
+**Fixed.** Validate group ids alongside the PSGC codes in
 `validateBenefitInput`'s caller:
 
 ```ts
@@ -628,7 +646,7 @@ anywhere else degrades to a client error rather than a stack trace.
 
 ---
 
-### 2.5 Malformed JSON returns 500
+### ✅ 2.5 Malformed JSON returns 500
 
 `src/middlewares/errorHandler.ts`
 
@@ -649,10 +667,10 @@ So `POST /api/auth/login` with `{ not json` gets
 `success`/`error`/`errorCode`/`data`, so a frontend written against the shared
 envelope reads `undefined` for all of them.
 
-**Failing tests:** `health.test.ts` › "rejects malformed JSON with 400, not
+**Were failing:** `health.test.ts` › "rejects malformed JSON with 400, not
 500", `auth.test.ts` › "rejects a non-object body with 400 rather than 500"
 
-**Fix.**
+**Fixed.**
 
 ```ts
 export const errorHandler = (err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -680,7 +698,7 @@ mid-write produces a second `res.json()` on an already-committed response.
 
 ---
 
-### 2.6 Unmatched `/api/*` paths return an HTML error page
+### ✅ 2.6 Unmatched `/api/*` paths return an HTML error page
 
 `src/app.ts:53` mounts `errorHandler` but there's no 404 handler before it, so
 Express's built-in finalhandler answers with
@@ -689,10 +707,10 @@ Express's built-in finalhandler answers with
 API response throws a parse error instead of surfacing "not found" — which is
 what a typo'd path or a stale deployed client actually hits.
 
-**Failing test:** `health.test.ts` › "returns a JSON body for an unmatched API
+**Was failing:** `health.test.ts` › "returns a JSON body for an unmatched API
 path, not an HTML error page"
 
-**Fix.** Between the last router and `errorHandler` in `src/app.ts`:
+**Fixed.** Between the last router and `errorHandler` in `src/app.ts`:
 
 ```ts
 app.use("/api", (req, res) => {
@@ -708,7 +726,7 @@ app.use("/api", (req, res) => {
 
 ---
 
-### 2.7 The bundle edit response drops children it didn't touch
+### ✅ 2.7 The bundle edit response drops children it didn't touch
 
 `PATCH /api/benefit-bundles/:id` returns only the requirements /
 utilizations / how-to-applies that were in the request body. The database is
@@ -723,18 +741,18 @@ A UI that re-renders the benefit from the edit response will show existing
 requirements vanishing, and an author who then saves again from that stale view
 can propagate the loss.
 
-**Failing test:** `benefitBundle.test.ts` › "returns the benefit's full child
+**Was failing:** `benefitBundle.test.ts` › "returns the benefit's full child
 set in the edit response, not just the submitted rows"
 
-**Fix.** Re-read the benefit at the end of `editBenefitBundle`'s transaction and
+**Fixed.** Re-read the benefit at the end of `editBenefitBundle`'s transaction and
 return that, rather than assembling the response from the write results — the
 same shape `createBenefitBundle` already returns for a fresh benefit.
 
 ---
 
-## Severity 3 — API contract / robustness
+## Severity 3 — API contract / robustness  ·  FIXED
 
-### 3.1 Unknown ids return `200` with empty data instead of `404`
+### ✅ 3.1 Unknown ids return `200` with empty data instead of `404`
 
 Four read routes treat "no such parent" and "parent exists but has nothing" as
 the same answer:
@@ -753,12 +771,12 @@ renders as "bound to nothing", i.e. *safe to delete*.
 `GET /api/rule-groups/*` also returns `data: []` for what is an object-or-null
 value everywhere else in the API.
 
-**Failing tests:** `field.test.ts` › "returns 404 for an unknown field rather
+**Were failing:** `field.test.ts` › "returns 404 for an unknown field rather
 than an empty list"; `fieldOptions.test.ts`, `fieldRuleGroup.test.ts` ›
 "returns 404 for an unknown …"; `lookups.test.ts` › "returns 404 for an unknown
 … rule group" (×2)
 
-**Fix.** Existence check first in each service, throwing the `*_NOT_FOUND` code
+**Fixed.** Existence check first in each service, throwing the `*_NOT_FOUND` code
 the controllers already map:
 
 ```ts
@@ -771,7 +789,7 @@ exists, with a 404 for a benefit/field id that doesn't resolve.
 
 ---
 
-### 3.2 Groups can be created with duplicate names
+### ✅ 3.2 Groups can be created with duplicate names
 
 `POST /api/groups` twice with the same `englishName` yields two rows.
 `DimGroup` has no unique constraint — deliberately, per the note in
@@ -780,9 +798,9 @@ constraint would be wrong here") — but nothing checks at the service layer
 either. Two identical "Department of Health" entries are then indistinguishable
 in the group picker on both the user form and the benefit form.
 
-**Failing test:** `group.test.ts` › "rejects a duplicate englishName"
+**Was failing:** `group.test.ts` › "rejects a duplicate englishName"
 
-**Fix.** In `group.service.ts`'s `addGroup`/`editGroup`, before writing:
+**Fixed.** In `group.service.ts`'s `addGroup`/`editGroup`, before writing:
 
 ```ts
 const clash = await prisma.dimGroup.findFirst({
@@ -798,11 +816,11 @@ would be stronger, but this matches how the rest of the codebase handles it
 
 ---
 
-## Observations not covered by a failing test
+## Observations not covered by a failing test  ·  FIXED
 
-These came out of reading the code while writing the suite. They aren't
-currently red — either they need a condition the test environment can't produce,
-or they're a latent hazard rather than a present bug.
+These came out of reading the code while writing the suite rather than from a failing
+test — either they need a condition the test environment can't produce, or they were a
+latent hazard rather than a present bug. All of them are now fixed.
 
 **4.1 `requireRole` doesn't use the standard envelope.**
 `src/middlewares/role.middleware.ts` returns `{ success, message }` only, while
@@ -964,3 +982,68 @@ Notes for whoever picks this up:
   the first pass.
 - Two tests are environment-gated on `psgc.gitlab.io` being reachable; one of
   them skips here.
+
+---
+
+## What changed, file by file
+
+Everything below is the fix pass for groups 1b, 2, 3 and 4. The Severity 1 authorization
+findings are untouched.
+
+**Backend — the quiz**
+
+- `src/services/benefitEligibility.service.ts` — added `expandWithVisibilityDeps`
+  (transitive closure over each field's `dynamicCondition` dependencies),
+  `withoutRepeaterSubfields`, and `resolveAskableUnanswered`; wired through all four
+  evaluators (signed-in list/detail, guest list/detail). `pendingFieldIds` is unchanged —
+  it answers a different question and is still short-circuited.
+- `src/services/benefitRuleGroup.service.ts` — reject a condition leaf that references a
+  repeater subfield (`CONDITION_FIELD_IS_REPEATER_SUBFIELD`).
+
+**Backend — errors and contracts**
+
+- `src/middlewares/errorHandler.ts` — honour `err.status`/`err.statusCode`, guard on
+  `res.headersSent`, always answer with the shared envelope, never echo `err.message` on a
+  500.
+- `src/app.ts` — JSON 404 for unmatched `/api/*` paths.
+- `src/utils/errorMapping.util.ts` — map Prisma `P2003` to 400 `INVALID_REFERENCE`, and
+  map the rule-tree authoring codes to 400 instead of letting them fall through to 500.
+- `src/controllers/benefitAttachment.controller.ts` — `serializeAttachment` on delete.
+- `src/controllers/fieldAnswer.controller.ts` — map `INVALID_INPUT: <detail>` to 400,
+  preserving the applicant-facing message the service wrote.
+- `src/services/benefit.service.ts` — `assertGroupsExist` on create and edit.
+- `src/services/benefitBundle.service.ts` — `readBenefitChildrenWith`; the edit path now
+  returns the benefit's real child set instead of echoing the submitted rows.
+- `src/services/benefitLocation.service.ts` — new `assertBenefitReadable`.
+- `src/services/benefit{Requirement,Utilization,HowToApply}.service.ts` — list paths use
+  it; create/edit/delete still use `assertUserCanModifyBenefit`.
+- `src/services/benefitAttachment.service.ts` — `assertParentExists` takes an
+  `access: "read" | "write"` mode; only the list path passes `"read"`.
+- `src/services/field.service.ts`, `fieldOptions.service.ts` — existence checks so an
+  unknown field 404s instead of returning an empty list.
+- `src/controllers/{field,fieldOptions,fieldRuleGroup,ruleGroup}.controller.ts` — surface
+  those as 404; `ruleGroup` now returns `data: null` rather than `[]`.
+- `src/services/group.service.ts` + `group.controller.ts` — `assertGroupNameAvailable`,
+  409 `DUPLICATE_GROUP`.
+- `src/middlewares/role.middleware.ts` — standard envelope on 401/403.
+- `src/utils/prisma.ts` — loads `dotenv/config` itself and fails fast on a missing
+  `DATABASE_URL`.
+- `src/utils/jwt.util.ts` — reads `JWT_SECRET` per call with a named error instead of
+  capturing it at import time.
+- `src/services/benefitNotification.service.ts` — skip the SMS job when eMessage isn't
+  configured.
+- `prisma/seeders/userRoleSeeder.ts` — the upserts now patch every identity column, so
+  re-running the seed genuinely restores a known-good state.
+- `backend/.env.example` — added; the README already told you to copy it.
+
+**Frontend**
+
+- `src/pages/public/AnswerMorePage.tsx` — filter out repeater subfields when resolving the
+  fields to render.
+- `src/services/benefits.service.ts` — a benefit with no eligibility row is no longer
+  defaulted to `PENDING` with no questions.
+
+**Test infrastructure**
+
+- `tsconfig.json` excludes `src/tests` so test files don't land in `dist/`;
+  `src/tests/tsconfig.json` + `npm run typecheck:tests` keeps them typechecked.

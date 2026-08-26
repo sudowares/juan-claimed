@@ -83,7 +83,13 @@ const request = async (
   const payload =
     options.rawBody !== undefined ? options.rawBody : body === undefined ? undefined : JSON.stringify(body);
 
-  const response = await fetch(buildUrl(path, options.query), { method, headers, body: payload });
+  // `body` is spread in conditionally rather than passed as `undefined` — exactOptionalPropertyTypes
+  // makes RequestInit reject an explicit undefined.
+  const response = await fetch(buildUrl(path, options.query), {
+    method,
+    headers,
+    ...(payload === undefined ? {} : { body: payload }),
+  });
 
   const text = await response.text();
   let parsed: unknown = undefined;

@@ -12,6 +12,15 @@ import { sendSms } from "./egovApi.service.js";
 // user's evaluation/send is isolated in its own try/catch so one failure can't drop the rest.
 export const notifyEligibleUsersOfNewBenefit = async (benefitId: string, benefitName: string): Promise<void> => {
   try {
+    // No eMessage config (local dev, previews, CI) means every send below fails against
+    // `undefined/messaging/v1/sms/push` — one logged stack trace per eligible user, on every
+    // benefit create, drowning out anything real. Nothing to do here in that case; say so
+    // once and stop.
+    if (!process.env.EGOV_MESSAGE_BASE_URL || !process.env.EGOV_EMESSAGE_ACCESS_TOKEN) {
+      console.info(`[BenefitNotification] eMessage is not configured — skipping SMS notify for benefit ${benefitId}.`);
+      return;
+    }
+
     const mobileField = await prisma.dimField.findFirst({
       where: { englishName: "Mobile Number", deletedAt: null },
       select: { id: true },
