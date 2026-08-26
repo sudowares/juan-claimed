@@ -6,10 +6,10 @@ seeded from `prisma/seed.ts` and talks to it over HTTP, so what it reports is
 what a client would actually get.
 
 ```bash
-npm test          # 583 tests across 70 suites
+npm test          # 593 tests across 73 suites
 ```
 
-**Result: 548 pass, 34 fail, 1 skipped.** Every one of the 34 failures is a
+**Result: 555 pass, 37 fail, 1 skipped.** Every one of the 37 failures is a
 real defect in the API, not a broken test — the failing assertions are listed
 below with a fix for each. The suite is red on purpose: it's the to-do list.
 
@@ -260,6 +260,223 @@ export const requireDeletableClassification = async (req: Request<{ id: string }
   return next();
 };
 ```
+
+---
+
+## Severity 1b — The "Answer more" follow-up quiz
+
+Tested in `src/tests/api/answerMoreQuiz.test.ts`, which drives the exact sequence
+`AnswerMorePage.tsx` performs: catalog → guest eligibility → union
+`unansweredFieldIds` of every `PENDING` benefit → `GET /api/fields/public` →
+`renderableFields()`.
+
+The reported symptom — *"it shows I'm eligible for these benefits and yet the
+questions to answer for those are not showing"* — reproduces, and has one
+dominant cause.
+
+### 1b.1 A question gated on another question is asked for, but can never be shown
+
+`src/services/benefitEligibility.service.ts:42` (`collectLeafRefs`) →
+`:57` (`unansweredOf`)
+
+`unansweredFieldIds` is built by walking **only the benefit's own rule tree
+leaves**. If one of those fields has its own `dynamicCondition` — a show/hide
+rule pointing at a *different* field — the field it depends on is never added to
+the list, because no benefit references it directly.
+
+The frontend then does this (`AnswerMorePage.tsx:44-46`):
+
+```ts
+const fieldIds = new Set(pending.flatMap((r) => r.unansweredFieldIds));
+const allFields = await getFields(token ?? undefined);
+setPendingFields(allFields.filter((f) => fieldIds.has(f.id)).sort(...));
+```
+
+and hands `pendingFields` to `FieldForm`, which filters through
+`renderableFields` → `isFieldVisible` → `evaluateNode`
+(`field-visibility.ts:553`):
+
+```ts
+const actualValue = answers[targetFieldId];
+if (actualValue === undefined || actualValue === null) return false;   // ← hidden
+```
+
+The driver has no answer, so the gated field evaluates to **hidden** and is
+dropped. The page renders its "Almost there — a few more questions" header with
+the benefit name chips, and an **empty form underneath**. There is no way for the
+applicant to progress: the one question that would unlock it is never asked.
+
+This is not an edge case. It's exactly what the admin UI's "Anchor to" /
+"Children Dependents" feature produces — an anchored child is *required* to have
+a `dynamicCondition` referencing its anchor (`assertAnchorFieldValid`), so every
+anchored follow-up question hits this the moment a benefit conditions on it.
+
+**Reproduction** (`answerMoreQuiz.test.ts` › "includes the driver field so the
+gated question can actually be shown"):
+
+```
+Driver  (SINGLE_SELECT "Yes"/"No")     — referenced by no benefit
+Gated   (TEXT)  dynamicCondition:      Driver EQUALS "Yes"
+Benefit         eligibilityTree:       Gated  EQUALS "target"
+
+POST /api/benefits/eligibility/guest  { answers: {} }
+→ { status: "PENDING", unansweredFieldIds: [ Gated ] }      ← Driver missing
+```
+
+The companion test states the invariant generally and reports which questions are
+unreachable:
+
+```
+some questions can never be displayed — their show/hide driver is neither answered nor asked for
++ [ 'ZZTEST Field mta7or389q5lm needs ZZTEST Field mta7or22ko93b' ]
+```
+
+**Fix.** Close `unansweredFieldIds` over each field's visibility dependencies —
+transitively, since a driver can itself be gated. In
+`benefitEligibility.service.ts`, alongside the existing
+`computeSettledHiddenFieldIds` (which already fetches exactly these trees):
+
+```ts
+// Every field the applicant must be able to SEE in order to answer `fieldIds` —
+// each referenced field plus, transitively, whatever its own show/hide condition
+// reads. Without this, "Answer More" is handed a question whose parent driver was
+// never asked for, and renderableFields() silently drops it.
+const expandWithVisibilityDeps = async (db: DbClient, fieldIds: Set<string>): Promise<Set<string>> => {
+  const seen = new Set(fieldIds);
+  let frontier = [...fieldIds];
+
+  while (frontier.length) {
+    const trees = await fetchDynamicRuleGroupTreesForFieldsWith(db, frontier);
+    const next: string[] = [];
+    for (const tree of trees.values()) {
+      if (!tree) continue;
+      for (const dep of collectReferencedFieldIds(tree as ClientRuleTreeRoot)) {
+        if (!seen.has(dep)) { seen.add(dep); next.push(dep); }
+      }
+    }
+    frontier = next;
+  }
+  return seen;
+};
+```
+
+then use it where `unansweredFieldIds` is computed — in
+`evaluateBenefitEligibilityWith`, `evaluateBenefitEligibilityDetailById`, and
+their two guest counterparts:
+
+```ts
+const askable = await expandWithVisibilityDeps(db, fieldIds);
+return {
+  benefitId: benefit.id,
+  ...combined,
+  unansweredFieldIds: withResidency(residency.pendingFieldIds, unansweredOf(askable, answers, hidden)),
+};
+```
+
+`pendingFieldIds` should stay as it is — it's the short-circuited "what still
+decides this benefit" list, a different question. Only `unansweredFieldIds`, the
+one "Answer More" renders from, needs the closure.
+
+Two things this deliberately preserves, both already correct and covered by
+passing tests:
+
+- Answering the driver a way that *hides* the question still settles the benefit
+  as `NOT_ELIGIBLE` rather than nagging forever (`computeSettledHiddenFieldIds`).
+  The expansion adds fields to ask about; it doesn't change any status.
+- Once every asked-for question is answered, the benefit resolves — no loop.
+
+### 1b.2 A repeater subfield gets asked for, and submitting it fails the whole save
+
+A benefit's eligibility tree can reference a **subfield of a REPEATER_GROUP**
+(one of the row columns) — nothing rejects that at authoring time. Its id then
+lands in `unansweredFieldIds`, and `AnswerMorePage` renders it as an ordinary
+standalone question, outside the repeater table it belongs to.
+
+Then submit (`AnswerMorePage.tsx:71`):
+
+```ts
+const answerable = renderableFields(pendingFields, draft).filter(
+  (f) => !isEgovFieldLocked(f, role, user) && f.fieldInputType.value !== "REPEATER_GROUP",
+);
+```
+
+A subfield isn't itself a `REPEATER_GROUP`, so it passes the filter and is
+submitted with no `repeaterGroupId`. `fieldAnswer.service.ts:247` rejects that
+with `ANSWER_GROUP_REQUIRED` → 400 → **the entire save fails**, including every
+other answer on the page. The applicant fills in the form, presses "Check my
+eligibility", and gets a generic error with nothing saved.
+
+The comment above that block says "REPEATER_GROUP is never referenced as a scalar
+condition field, so nothing repeater-shaped leaks in" — true of the repeater
+field itself, but its subfields aren't covered.
+
+**Failing test:** `answerMoreQuiz.test.ts` › "does not ask for a repeater
+subfield the page cannot submit"
+
+**Fix.** Two changes, both worth making:
+
+1. Reject the reference at authoring time, where the error is actionable. In
+   `benefitRuleGroup.service.ts`'s tree validation, alongside the existing
+   `OPERATOR_INPUT_TYPE_MISMATCH` / `CONDITION_FIELD_NOT_FOUND` checks:
+
+   ```ts
+   if (field.parentFieldId) throw new Error("CONDITION_FIELD_IS_REPEATER_SUBFIELD");
+   ```
+
+   A row column is only meaningful through its repeater's own aggregate
+   operators (`ANY_MATCH`, `COUNT_GREATER_THAN`, …), which target the parent.
+
+2. Defend the quiz regardless, so existing saved rules can't break the save —
+   filter subfields out when building the list:
+
+   ```ts
+   setPendingFields(
+     allFields
+       .filter((f) => fieldIds.has(f.id) && !f.parentFieldId)
+       .sort((a, b) => a.sortOrder - b.sortOrder),
+   );
+   ```
+
+### 1b.3 A benefit missing from the eligibility response is silently shown as a candidate
+
+`frontend/src/services/benefits.service.ts:54-57`
+
+```ts
+return benefits.map((benefit) => {
+  const result = byBenefitId.get(benefit.id);
+  return { benefit, status: result?.status ?? "PENDING", pendingFieldIds: result?.pendingFieldIds ?? [], unansweredFieldIds: result?.unansweredFieldIds ?? [] };
+});
+```
+
+If the eligibility call returns no row for a benefit, it's defaulted to
+`PENDING` with **no fields** — producing the same on-screen result as 1b.1 (a
+benefit chip with no question) from a completely different cause, which makes the
+real bug harder to identify from a bug report.
+
+Today the two endpoints do iterate the same benefit set, so this doesn't fire —
+the test asserting parity **passes**, and is there to keep it that way. But the
+default is still wrong: an absent row means "we don't know", not "you might
+qualify".
+
+**Fix.** Default to something that can't masquerade as a candidate, and say so:
+
+```ts
+const result = byBenefitId.get(benefit.id);
+if (!result) console.warn(`[eligibility] no result for benefit ${benefit.id}`);
+return { benefit, status: result?.status ?? "NOT_ELIGIBLE", pendingFieldIds: [], unansweredFieldIds: [] };
+```
+
+### What was checked here and is correct
+
+- Answering a driver so the gated question is **hidden** correctly settles the
+  benefit as `NOT_ELIGIBLE` instead of leaving it PENDING forever.
+- Answering a driver so the question is **revealed** correctly surfaces it.
+- Answering everything the quiz asks for resolves the benefit — no re-ask loop.
+- Guest `repeaterRows` are evaluated properly; a rule on a `REPEATER_GROUP` field
+  itself resolves once rows are added.
+- Every benefit in the public catalog gets an eligibility row.
+- No benefit in the seeded catalog is `PENDING` with an empty
+  `unansweredFieldIds` (the residency case fixed by `withResidency` holds).
 
 ---
 
@@ -672,6 +889,49 @@ Worth recording so they don't get re-litigated:
   correctly refused. Deletion is the one gap (1.7).
 - **Bundle atomicity.** A bundle whose eligibility tree references a missing
   field is rejected without leaving an orphaned benefit behind.
+
+---
+
+## What can be tested without the external service credentials
+
+Four integrations need environment values this environment doesn't have. Here's
+what that actually costs, per flow:
+
+| Flow | Env it needs | Testable here? |
+| --- | --- | --- |
+| **Guest / no account** | — | **Fully.** Every route, end to end. |
+| **Username + password login** | `JWT_SECRET` (set locally) | **Fully.** The suite logs in as the seeded superadmin and both agents over `POST /api/auth/login` and uses real Bearer JWTs throughout. |
+| Google sign-in | `GOOGLE_CLIENT_ID` | **Partly.** See below. |
+| eGovPH SSO | `EGOV_BASE_URL`, `EGOV_PARTNER_CODE`, `EGOV_PARTNER_SECRET` | Validation + failure path only. |
+| Auto-translate | `EGOV_AI_CORE_BASE_URL`, `EGOV_AI_ACCESS_CODE` | Auth + validation + failure path only. |
+| eMessage SMS | `EGOV_MESSAGE_BASE_URL`, `EGOV_EMESSAGE_ACCESS_TOKEN` | Failure isolation only. |
+| Attachment upload token | `BLOB_READ_WRITE_TOKEN` | Auth + failure path only. |
+
+**Google sign-in specifically.** Setting `GOOGLE_CLIENT_ID` isn't enough — the
+route calls `googleClient.verifyIdToken({ idToken })`, which requires a token
+actually signed by Google's keys. Nobody can mint one without a real browser
+sign-in, so the *success* branch of `loginWithGoogle` can't be exercised by any
+automated test, here or in CI. What the suite does cover: the route is public,
+an empty body is a 400 `VALIDATION_ERROR`, and an unverifiable token is a
+**401** (not a 500) — which is the part most likely to regress. The
+account-provisioning logic behind it (`deriveUniqueUsername`, the deactivated
+account check) is reachable and worth a unit test against a stubbed
+`verifyIdToken` if you want it covered.
+
+So: **the quiz findings above are not blocked by any of this.** "Answer more"
+runs entirely on the guest path — `POST /api/benefits/eligibility/guest`,
+`GET /api/fields/public`, `GET /api/benefits/public` — none of which touch eGov,
+Google, or the translator. The same evaluator serves the signed-in path
+(`evaluateBenefitEligibilityWith` vs `...ForAnswers`), so 1b.1 and 1b.2 affect
+logged-in applicants identically.
+
+One thing the missing eMessage config did surface: creating a benefit fires
+`notifyEligibleUsersOfNewBenefit`, which throws per user against
+`undefined/messaging/v1/sms/push`. It's correctly fire-and-forget — the response
+is unaffected and each user is isolated — but it floods the log with stack traces
+on every benefit create. Worth an early return when `EGOV_MESSAGE_BASE_URL` is
+unset, so a local or preview environment doesn't generate noise that hides real
+errors.
 
 ---
 
