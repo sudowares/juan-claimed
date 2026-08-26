@@ -2,6 +2,14 @@ import type { Request, Response } from "express";
 import * as userService from "../services/user.service.js";
 import type { AssignRoleRequest, CreateUserRequest } from "../requests/user.request.js";
 
+const SUPERADMIN_REMOVAL_ERRORS = ["CANNOT_DEMOTE_SELF", "CANNOT_DELETE_SELF", "LAST_SUPERADMIN_PROTECTED"];
+
+const SUPERADMIN_REMOVAL_DETAIL: Record<string, string> = {
+  CANNOT_DEMOTE_SELF: "You cannot change your own account out of the Superadmin role — ask another Superadmin to do it.",
+  CANNOT_DELETE_SELF: "You cannot delete your own Superadmin account — ask another Superadmin to do it.",
+  LAST_SUPERADMIN_PROTECTED: "This is the last active Superadmin account — promote another Superadmin first.",
+};
+
 const MATRIX_CONSTRAINT_ERRORS = [
   "INVALID_SUPERADMIN_CONFIG",
   "AGENT_REQUIRES_SCOPE",
@@ -98,6 +106,18 @@ export const assignRoleAndScope = async (
         success: false,
         message: "Could not assign role.",
         error: "The requested user or scope does not exist.",
+        errorCode: error.message,
+        data: null,
+      });
+    }
+
+    // Removing the last (or your own) superadmin is a permission decision, not a bad
+    // payload — see user.service.ts's assertSuperadminRemovable.
+    if (SUPERADMIN_REMOVAL_ERRORS.includes(error.message)) {
+      return res.status(403).json({
+        success: false,
+        message: "Could not assign role.",
+        error: SUPERADMIN_REMOVAL_DETAIL[error.message],
         errorCode: error.message,
         data: null,
       });
@@ -306,6 +326,18 @@ export const deleteUser = async (req: Request<{ id: string }>, res: Response) =>
       data: result,
     });
   } catch (error: any) {
+    // Removing the last (or your own) superadmin is a permission decision, not a bad
+    // payload — see user.service.ts's assertSuperadminRemovable.
+    if (SUPERADMIN_REMOVAL_ERRORS.includes(error.message)) {
+      return res.status(403).json({
+        success: false,
+        message: "Could not delete user.",
+        error: SUPERADMIN_REMOVAL_DETAIL[error.message],
+        errorCode: error.message,
+        data: null,
+      });
+    }
+
     if (error.message === "USER_NOT_FOUND") {
       return res.status(404).json({
         success: false,

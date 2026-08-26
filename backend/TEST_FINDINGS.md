@@ -12,13 +12,13 @@ npm run typecheck:tests   # the suite is excluded from `npm run build`, checked 
 ## Status
 
 The first pass found **37 real defects**. Everything not in the authorization group has
-since been **fixed**; the suite is now **579 pass, 13 fail, 1 skipped**, and all 13
-remaining failures are the Severity 1 items below, left open deliberately because each one
-is a policy decision rather than a bug with an obvious right answer.
+since been **fixed**, and the Severity 1 authorization items are being worked through one
+at a time as decisions are made on each. Every remaining failure is a Severity 1 item still
+marked ⚠️ below.
 
 | Group | Finding | Status |
 | --- | --- | --- |
-| **1** | Authorization holes (1.1 – 1.7) | **Open** — 13 failing tests |
+| **1** | Authorization holes | 1.4, 1.5 fixed · **1.1, 1.2, 1.3, 1.6, 1.7 open** |
 | **1b** | "Answer more" quiz (1b.1 – 1b.3) | Fixed |
 | **2** | Broken for real users (2.1 – 2.7) | Fixed |
 | **3** | API contract / robustness (3.1 – 3.2) | Fixed |
@@ -135,7 +135,7 @@ this router doesn't need a public variant.
 
 ---
 
-### ⚠️ 1.4 A superadmin can demote themselves and lock everyone out
+### ✅ 1.4 A superadmin can demote themselves and lock everyone out
 
 `src/services/user.service.ts:29` (`assignUserRole`)
 
@@ -152,31 +152,36 @@ run demoted the seeded superadmin, and every subsequent test in that run failed
 with 403 until the row was repaired by hand. (`prisma/seed.ts` does not repair
 it either; see 4.2.)
 
-**Failing test:** `user.test.ts` › "does not let a superadmin demote themselves
-out of superadmin"
+**Was failing:** `user.test.ts` › "does not let a superadmin demote themselves out of superadmin"
 
-**Fix.** Guard both directions in `assignUserRole`, before `validateRoleConfig`:
+**Fixed.** `user.service.ts` gained `assertSuperadminRemovable`, called from
+`assignUserRole` (only when the submitted role isn't SUPERADMIN, so a no-op re-save of an
+existing superadmin still works) and from `deleteUser`:
 
-```ts
-const target = await prisma.dimUser.findFirst({ where: { id, deletedAt: null } });
-if (!target) throw new Error("USER_NOT_FOUND");
+1. You can never demote or delete your **own** superadmin account. Someone else does it,
+   which also guarantees someone else is still around afterwards.
+2. Nobody can remove the **last remaining active** superadmin.
 
-if (target.role === "SUPERADMIN" && data.role !== "SUPERADMIN") {
-  if (target.id === actingUser.id) throw new Error("CANNOT_DEMOTE_SELF");
+Deliberately narrower than `setUserActive`/`resetUserPassword`, which refuse on *any*
+superadmin — a superadmin who leaves the organisation still has to be removable, and
+option (b) ("no superadmin can ever be demoted or deleted") would have made that a
+database-only operation.
 
-  const remaining = await prisma.dimUser.count({
-    where: { role: "SUPERADMIN", active: true, deletedAt: null, id: { not: id } },
-  });
-  if (remaining === 0) throw new Error("LAST_SUPERADMIN_PROTECTED");
-}
-```
+Worth knowing: rule 1 is what actually fires today. Anyone holding `MANAGE_USERS` is
+themselves an active superadmin, so acting on a *different* superadmin already implies at
+least two exist and the count in rule 2 can't reach zero. Rule 2 is a backstop for the day
+that stops being true — `MANAGE_USERS` granted to another role, a background job calling
+the service directly, a superadmin deactivated through some future path.
 
-and map both codes to 403 in `user.controller.ts` alongside the existing
-`SUPERADMIN_PROTECTED` branch.
+`user.controller.ts` maps `CANNOT_DEMOTE_SELF` / `CANNOT_DELETE_SELF` /
+`LAST_SUPERADMIN_PROTECTED` to 403, each with a message naming the way out ("ask another
+Superadmin", "promote another Superadmin first").
 
----
+Four tests cover it: the two failing ones now assert the specific 403 and errorCode, plus
+two new ones proving the guard didn't over-tighten — one superadmin can still demote
+another, and can still delete another.
 
-### ⚠️ 1.5 A superadmin account can be deleted
+### ✅ 1.5 A superadmin account can be deleted
 
 `src/services/user.service.ts:132` (`deleteUser`)
 
@@ -192,16 +197,10 @@ export const deleteUser = async (id: string, actingUser: any) => {
 matters most is the one missing the check. Same unrecoverable lockout as 1.4,
 including deleting yourself.
 
-**Failing test:** `user.test.ts` › "refuses to delete a superadmin"
+**Was failing:** `user.test.ts` › "refuses to delete your own superadmin account"
 
-**Fix.** One line, matching its two siblings:
-
-```ts
-if (user.role === "SUPERADMIN") throw new Error("SUPERADMIN_PROTECTED");
-```
-
-`user.controller.ts`'s `deleteUser` also needs the `SUPERADMIN_PROTECTED` → 403
-branch that `setUserActive` already has.
+**Fixed.** Same `assertSuperadminRemovable` guard as 1.4 — see there for the full
+reasoning and the two rules.
 
 ---
 

@@ -284,6 +284,45 @@ describe("PATCH /api/users/:id/role", () => {
     assert.equal(response.status, 403);
   });
 
+  /** A second, disposable SUPERADMIN — the role config the matrix demands (see userAccess.service.ts). */
+  const createSecondSuperadmin = async () => {
+    const response = await api.post(
+      "/api/users",
+      staffPayload({ role: "SUPERADMIN", scopeId: ctx.refs.scopes.SUPERADMIN, groupId: ctx.refs.groupId, psgcCode: "SUPERADMIN" }),
+      ctx.actors.superadmin.auth,
+    );
+    assert.equal(response.status, 201, response.text.slice(0, 400));
+    return response.body.data.id as string;
+  };
+
+  it("still lets one superadmin demote another", async () => {
+    // The lockout guard must not make a departing superadmin unremovable — that would just
+    // trade one operational dead end for another.
+    const id = await createSecondSuperadmin();
+
+    const response = await api.patch(
+      `/api/users/${id}/role`,
+      { role: "AGENT", scopeId: ctx.refs.scopes.NATIONAL, groupId: ctx.refs.groupId, psgcCode: null },
+      ctx.actors.superadmin.auth,
+    );
+
+    assert.equal(response.status, 200, response.text.slice(0, 400));
+    assert.equal(response.body.data.role, "AGENT");
+  });
+
+  it("still lets a superadmin re-save their own account as a superadmin", async () => {
+    // The Users form submits the whole role config on every save, so a no-op re-save of
+    // your own account must not trip the demotion guard.
+    const response = await api.patch(
+      `/api/users/${ctx.actors.superadmin.id}/role`,
+      { role: "SUPERADMIN", scopeId: ctx.refs.scopes.SUPERADMIN, groupId: ctx.refs.groupId, psgcCode: "SUPERADMIN" },
+      ctx.actors.superadmin.auth,
+    );
+
+    assert.equal(response.status, 200, response.text.slice(0, 400));
+    assert.equal(response.body.data.role, "SUPERADMIN");
+  });
+
   it("does not let a superadmin demote themselves out of superadmin", async () => {
     // Locking every superadmin out of the system is unrecoverable through the API.
     const before = await prisma.dimUser.findUniqueOrThrow({ where: { id: ctx.actors.superadmin.id } });
@@ -302,11 +341,12 @@ describe("PATCH /api/users/:id/role", () => {
       data: { role: before.role, scopeId: before.scopeId, groupId: before.groupId, psgcCode: before.psgcCode },
     });
 
-    assert.notEqual(
+    assert.equal(
       response.status,
-      200,
+      403,
       "a superadmin demoting their own account can lock everyone out of user management",
     );
+    assert.equal(response.body.errorCode, "CANNOT_DEMOTE_SELF");
   });
 });
 
@@ -439,14 +479,28 @@ describe("DELETE /api/users/:id", () => {
     assert.equal(response.status, 404);
   });
 
-  it("refuses to delete a superadmin", async () => {
+  it("refuses to delete your own superadmin account", async () => {
     const response = await api.del(`/api/users/${ctx.actors.superadmin.id}`, ctx.actors.superadmin.auth);
 
     // Same reasoning as the self-demotion test: undo before asserting, so a missing
     // guard fails the test instead of destroying the fixture database.
     await prisma.dimUser.update({ where: { id: ctx.actors.superadmin.id }, data: { deletedAt: null } });
 
-    assert.notEqual(response.status, 200, "deleting the only superadmin locks everyone out of user management");
+    assert.equal(response.status, 403, "deleting the only superadmin locks everyone out of user management");
+    assert.equal(response.body.errorCode, "CANNOT_DELETE_SELF");
+  });
+
+  it("still lets one superadmin delete another", async () => {
+    const created = await api.post(
+      "/api/users",
+      staffPayload({ role: "SUPERADMIN", scopeId: ctx.refs.scopes.SUPERADMIN, groupId: ctx.refs.groupId, psgcCode: "SUPERADMIN" }),
+      ctx.actors.superadmin.auth,
+    );
+    assert.equal(created.status, 201, created.text.slice(0, 400));
+
+    const response = await api.del(`/api/users/${created.body.data.id}`, ctx.actors.superadmin.auth);
+
+    assert.equal(response.status, 200, response.text.slice(0, 400));
   });
 
   it("is forbidden for an agent", async () => {

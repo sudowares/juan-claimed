@@ -26,9 +26,51 @@ export const fetchUserById = async (id: string) => {
   return omitPassHash(user);
 };
 
+/**
+ * Guards the two ways a superadmin account can disappear: being demoted out of the role,
+ * and being deleted. Both are one-way doors — every user-management route is gated on
+ * PERMISSIONS.MANAGE_USERS, which only SUPERADMIN holds, so once the last one is gone
+ * nobody can promote anyone back and recovery means direct SQL against the database.
+ *
+ * Deliberately narrower than setUserActive/resetUserPassword, which refuse on ANY
+ * superadmin: a superadmin who leaves the organisation still has to be removable. The two
+ * rules here are the minimum that keeps that possible without allowing a lockout —
+ *
+ *   1. You can never demote or delete your OWN superadmin account. Someone else does it,
+ *      which also means someone else is still around afterwards.
+ *   2. Nobody can remove the last remaining active superadmin.
+ *
+ * Rule 1 is what actually fires today: anyone with MANAGE_USERS is themselves an active
+ * superadmin, so acting on a DIFFERENT superadmin already implies at least two exist. Rule 2
+ * is the backstop for the day that stops being true (MANAGE_USERS granted to another role,
+ * a background job calling this directly, a superadmin deactivated by some future path).
+ */
+const assertSuperadminRemovable = async (
+  target: { id: string; role: UserRole },
+  actingUser: { id: string },
+  action: "demote" | "delete",
+) => {
+  if (target.role !== "SUPERADMIN") return;
+
+  if (target.id === actingUser.id) {
+    throw new Error(action === "demote" ? "CANNOT_DEMOTE_SELF" : "CANNOT_DELETE_SELF");
+  }
+
+  const remaining = await prisma.dimUser.count({
+    where: { role: "SUPERADMIN", active: true, deletedAt: null, id: { not: target.id } },
+  });
+  if (remaining === 0) throw new Error("LAST_SUPERADMIN_PROTECTED");
+};
+
 export const assignUserRole = async (id: string, data: AssignRoleDto, actingUser: any) => {
   const user = await prisma.dimUser.findFirst({ where: { id, deletedAt: null } });
   if (!user) throw new Error("USER_NOT_FOUND");
+
+  // Only a change OUT of SUPERADMIN can orphan the system — re-saving a superadmin as a
+  // superadmin (the Users form submits the whole role config every time) must still work.
+  if (data.role !== "SUPERADMIN") {
+    await assertSuperadminRemovable(user, actingUser, "demote");
+  }
 
   // Normalize undefined to null so the matrix validation is exact.
   const scopeId = data.scopeId ?? null;
@@ -132,6 +174,8 @@ export const resetUserPassword = async (id: string, actingUser: any) => {
 export const deleteUser = async (id: string, actingUser: any) => {
   const user = await prisma.dimUser.findFirst({ where: { id, deletedAt: null } });
   if (!user) throw new Error("USER_NOT_FOUND");
+
+  await assertSuperadminRemovable(user, actingUser, "delete");
 
   const deletedAt = new Date();
   await prisma.dimUser.update({
