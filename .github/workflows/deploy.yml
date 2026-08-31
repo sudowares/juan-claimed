@@ -25,8 +25,8 @@ jobs:
           file: ./backend/Dockerfile.prod
           push: true
           tags: |
-            registry.nexflare.tech/juan-backend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
-            registry.nexflare.tech/juan-backend:${{ github.ref_name }}-${{ github.sha }}
+            registry.nexflare.tech/juan-claimed-backend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
+            registry.nexflare.tech/juan-claimed-backend:${{ github.ref_name }}-${{ github.sha }}
 
       - name: Build and push frontend
         uses: docker/build-push-action@v5
@@ -39,8 +39,8 @@ jobs:
             VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
             VITE_UNLOCK_GOOGLE_SYNCED_FIELDS=${{ secrets.UNLOCK_GOOGLE_SYNCED_FIELDS }}
           tags: |
-            registry.nexflare.tech/juan-frontend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
-            registry.nexflare.tech/juan-frontend:${{ github.ref_name }}-${{ github.sha }}
+            registry.nexflare.tech/juan-claimed-frontend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
+            registry.nexflare.tech/juan-claimed-frontend:${{ github.ref_name }}-${{ github.sha }}
 
   deploy-staging:
     needs: build-and-push

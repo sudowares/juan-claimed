@@ -35,7 +35,7 @@ services:
       retries: 5
 
   backend:
-    image: registry.nexflare.tech/juan-backend:staging
+    image: registry.nexflare.tech/juan-claimed-backend:staging
     container_name: juan-claimed-backend-staging
     restart: unless-stopped
     # No published port — reached over proxy-net at http://juan-claimed-backend-staging:4000,
@@ -71,7 +71,7 @@ services:
   frontend:
     # Vite build args are supplied at CI build time (.github/workflows/deploy.yml),
     # not here — same reasoning as docker-compose.prod.yml.
-    image: registry.nexflare.tech/juan-frontend:staging
+    image: registry.nexflare.tech/juan-claimed-frontend:staging
     container_name: juan-claimed-frontend-staging
     restart: unless-stopped
     # Reached over proxy-net at http://juan-claimed-frontend-staging:80

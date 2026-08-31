@@ -33,7 +33,7 @@ services:
       retries: 5
 
   backend:
-    image: registry.nexflare.tech/juan-backend:latest
+    image: registry.nexflare.tech/juan-claimed-backend:latest
     container_name: juan-claimed-backend
     restart: unless-stopped
     # No published port at all — the VPS's Nginx runs in its OWN container (proxy-net),
@@ -75,7 +75,7 @@ services:
     # supplied as --build-arg in the GitHub Actions build step (.github/workflows/deploy.yml),
     # not here. Changing one of those values means rebuilding+pushing the image, not editing
     # this file.
-    image: registry.nexflare.tech/juan-frontend:latest
+    image: registry.nexflare.tech/juan-claimed-frontend:latest
     container_name: juan-claimed-frontend
     restart: unless-stopped
     # No published port — same reasoning as backend above. The proxy container reaches this
