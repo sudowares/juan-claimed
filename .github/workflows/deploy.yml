@@ -1,0 +1,75 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main, staging]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to self-hosted registry
+        uses: docker/login-action@v3
+        with:
+          registry: registry.nexflare.tech
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # main -> :latest (+ SHA for rollback), staging -> :staging (+ SHA)
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.prod
+          push: true
+          tags: |
+            registry.nexflare.tech/juan-backend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
+            registry.nexflare.tech/juan-backend:${{ github.ref_name }}-${{ github.sha }}
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile.prod
+          push: true
+          build-args: |
+            VITE_API_BASE_URL=
+            VITE_GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}
+            VITE_UNLOCK_GOOGLE_SYNCED_FIELDS=${{ secrets.UNLOCK_GOOGLE_SYNCED_FIELDS }}
+          tags: |
+            registry.nexflare.tech/juan-frontend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
+            registry.nexflare.tech/juan-frontend:${{ github.ref_name }}-${{ github.sha }}
+
+  deploy-staging:
+    needs: build-and-push
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and restart staging on the VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/apps/hackathons/juan-claimed/staging
+            docker compose pull
+            docker compose up -d
+
+  deploy-prod:
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and restart prod on the VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /opt/apps/hackathons/juan-claimed/prod
+            docker compose pull
+            docker compose up -d

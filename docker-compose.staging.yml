@@ -1,0 +1,89 @@
+# Staging stack for the VPS — a second, separate deployment of images built from the exact
+# same *.prod Dockerfiles as prod, for testing changes before they hit real users.
+#   Run:  docker compose -f docker-compose.staging.yml pull && docker compose -f docker-compose.staging.yml up -d
+# Same as prod: this file only PULLS — GitHub Actions builds+pushes on every push to the
+# `staging` branch. NOT LIVE YET — needs the registry + root Nginx proxy running first.
+#
+# Differences from docker-compose.prod.yml:
+#   - pulls the :staging tag, not :latest
+#   - separate Postgres volume (postgres_data_staging) — never touches real prod data
+#   - separate container names (*-staging) — can run alongside prod without colliding
+#   - reads its own .env — its own JWT_SECRET / POSTGRES_PASSWORD
+#   - VITE_API_BASE_URL stays "" (same-origin design) — works unchanged since the proxy
+#     routes by whichever domain/Host header actually reaches it (staging.yourdomain.com
+#     gets its own conf.d entry pointing at these container names, see
+#     01-folder-structure.md §2.4)
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: juan-claimed-postgres-staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: app
+    # Different HOST port than prod's postgres (still localhost-only) so both can run
+    # side by side without a port clash if you ever need host-side psql into staging too.
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data_staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    image: registry.nexflare.tech/juan-backend:staging
+    container_name: juan-claimed-backend-staging
+    restart: unless-stopped
+    # No published port — reached over proxy-net at http://juan-claimed-backend-staging:4000,
+    # same reasoning as prod.
+    networks:
+      - default
+      - proxy-net
+    environment:
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/app?schema=public
+      BACKEND_PORT: 4000
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      JWT_SECRET: ${JWT_SECRET}
+      EGOV_BASE_URL: ${EGOV_BASE_URL}
+      EGOV_PARTNER_CODE: ${EGOV_PARTNER_CODE}
+      EGOV_PARTNER_SECRET: ${EGOV_PARTNER_SECRET}
+      EGOV_EVERIFY_CLIENT_ID: ${EGOV_EVERIFY_CLIENT_ID}
+      EGOV_EVERIFY_CLIENT_SECRET: ${EGOV_EVERIFY_CLIENT_SECRET}
+      EGOV_EVERIFY_PUBKEY: ${EGOV_EVERIFY_PUBKEY}
+      EGOV_EMESSAGE_ACCESS_TOKEN: ${EGOV_EMESSAGE_ACCESS_TOKEN}
+      EGOV_MESSAGE_BASE_URL: ${EGOV_MESSAGE_BASE_URL}
+      EGOV_AI_ACCESS_CODE: ${EGOV_AI_ACCESS_CODE}
+      EGOV_AI_CORE_BASE_URL: ${EGOV_AI_CORE_BASE_URL}
+      EGOV_PAY_API_KEY: ${EGOV_PAY_API_KEY}
+      EGOV_PAY_SETTLEMENT_TEMPLATE_UUID: ${EGOV_PAY_SETTLEMENT_TEMPLATE_UUID}
+      EGOV_REPORT_ACCESS_TOKEN: ${EGOV_REPORT_ACCESS_TOKEN}
+      EGOV_FACE_LIVENESS_API_KEY: ${EGOV_FACE_LIVENESS_API_KEY}
+      EGOV_COMPASS_API_KEY: ${EGOV_COMPASS_API_KEY}
+      BLOB_READ_WRITE_TOKEN: ${BLOB_READ_WRITE_TOKEN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    # Vite build args are supplied at CI build time (.github/workflows/deploy.yml),
+    # not here — same reasoning as docker-compose.prod.yml.
+    image: registry.nexflare.tech/juan-frontend:staging
+    container_name: juan-claimed-frontend-staging
+    restart: unless-stopped
+    # Reached over proxy-net at http://juan-claimed-frontend-staging:80
+    networks:
+      - proxy-net
+    depends_on:
+      - backend
+
+networks:
+  default:
+  proxy-net:
+    external: true
+
+volumes:
+  postgres_data_staging:

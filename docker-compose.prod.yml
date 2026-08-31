@@ -1,13 +1,19 @@
 # Production stack for the VPS.
-#   Run:  docker compose -f docker-compose.prod.yml up -d --build
+#   Run:  docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml up -d
+# This file only ever PULLS images — GitHub Actions builds them (from the *.prod
+# Dockerfiles) and pushes to the self-hosted registry. No source code, no `build:`,
+# no git checkout needed on the VPS for this stack at all — just this file + .env.
+# NOT LIVE YET — needs the registry (10-self-hosted-docker-registry.md) and root Nginx
+# proxy (01-folder-structure.md §2) actually running first.
 # Differences from the dev docker-compose.yml:
-#   - builds the *.prod Dockerfiles (client baked in, real build, no tsx/vite watch)
+#   - pulls prebuilt images (client baked in at CI build time, no tsx/vite watch)
 #   - NO source bind mounts (image is the source of truth)
 #   - Postgres + Prisma Studio are NOT exposed to the internet
 #   - no CHOKIDAR polling, no demo-persona seeding
 services:
   postgres:
     image: postgres:17-alpine
+    container_name: juan-claimed-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -27,14 +33,18 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.prod
+    image: registry.nexflare.tech/juan-backend:latest
+    container_name: juan-claimed-backend
     restart: unless-stopped
-    # Bound to localhost — the host nginx (reverse proxy + TLS) is the only thing that
-    # reaches it. Never public. NO 5555 (Prisma Studio) either.
-    ports:
-      - "127.0.0.1:4000:4000"
+    # No published port at all — the VPS's Nginx runs in its OWN container (proxy-net),
+    # not on the host, so it reaches this over the shared Docker network by container name
+    # (http://juan-claimed-backend:4000), not via a host-bound port. Nothing to publish, nothing to
+    # lock to localhost — there's no host-side listener to secure in the first place.
+    # (Need host-side access for a one-off debug session? `docker compose exec backend sh`,
+    # or a temporary `docker run -p`, rather than leaving a port open permanently.)
+    networks:
+      - default
+      - proxy-net
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/app?schema=public
       BACKEND_PORT: 4000
@@ -61,27 +71,24 @@ services:
         condition: service_healthy
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-      # Vite bakes these into the static bundle at BUILD time — they are build args, not
-      # runtime env. Rebuild the image if you change them.
-      args:
-        # Empty = same-origin. The frontend's own paths already carry the /api prefix
-        # (e.g. apiFetch("/api/scopes")), so the base must be just the origin. Host nginx
-        # routes /api/* to the backend, so the browser calls https://<domain>/api/... — no
-        # CORS, no hardcoded IP.
-        VITE_API_BASE_URL: ""
-        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-        # Baked into the bundle at build time — must be rebuilt to change (runtime .env can't).
-        VITE_UNLOCK_GOOGLE_SYNCED_FIELDS: ${UNLOCK_GOOGLE_SYNCED_FIELDS}
+    # Vite bakes VITE_* vars into the static bundle at BUILD time, not runtime — they're
+    # supplied as --build-arg in the GitHub Actions build step (.github/workflows/deploy.yml),
+    # not here. Changing one of those values means rebuilding+pushing the image, not editing
+    # this file.
+    image: registry.nexflare.tech/juan-frontend:latest
+    container_name: juan-claimed-frontend
     restart: unless-stopped
-    # Bound to localhost — host nginx proxies to this. Container nginx serves the static
-    # dist on port 80 inside the container; host side uses 8083 (free on this VPS).
-    ports:
-      - "127.0.0.1:8083:80"
+    # No published port — same reasoning as backend above. The proxy container reaches this
+    # over proxy-net at http://juan-claimed-frontend:80 (container nginx serves the static dist there).
+    networks:
+      - proxy-net
     depends_on:
       - backend
+
+networks:
+  default:
+  proxy-net:
+    external: true
 
 volumes:
   postgres_data:
