@@ -13,8 +13,12 @@ import { PERMISSIONS } from "../constants/permissions.js";
 
 export const groupRouter = Router();
 
-groupRouter.get("/", getAllGroups);
-groupRouter.get("/:id", getGroupById);
+// Both reads were previously mounted with no middleware at all, unlike every other /api/*
+// list — the agency directory was readable by anyone on the internet. Every deliberately
+// public route in this codebase carries an explicit "/public" segment and a comment saying
+// why; these had neither, so it was an omission rather than a decision.
+groupRouter.get("/", mockAuth, requireRole(PERMISSIONS.VIEW_GROUPS), getAllGroups);
+groupRouter.get("/:id", mockAuth, requireRole(PERMISSIONS.VIEW_GROUPS), getGroupById);
 
 groupRouter.post(
   "/",

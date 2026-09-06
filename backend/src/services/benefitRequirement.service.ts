@@ -1,11 +1,12 @@
 import { prisma, Prisma } from "../utils/prisma.js";
-import { assertUserCanModifyBenefit } from "./benefitLocation.service.js";
+import { assertBenefitReadable, assertUserCanModifyBenefit } from "./benefitLocation.service.js";
 
 // See benefitLocation.service.ts — same optional-transaction-client pattern.
 type Db = typeof prisma | Prisma.TransactionClient;
 
 export const listRequirements = async (benefitId: string, user: any) => {
-  await assertUserCanModifyBenefit(benefitId, user);
+  // Read-only: existence, not jurisdiction — see assertBenefitReadable.
+  await assertBenefitReadable(benefitId);
 
   return prisma.fctBenefitRequirement.findMany({
     where: { benefitId, deletedAt: null },

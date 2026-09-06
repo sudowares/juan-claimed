@@ -2,11 +2,26 @@ import type { Response } from "express";
 import * as dynamicRuleGroupService from "../services/fieldRuleGroup.service.js";
 import type { GetDynamicRuleGroupTreeRequest, SaveDynamicRuleGroupTreeRequest } from "../requests/fieldRuleGroup.request.js";
 import type { DynamicRuleTreeRoot } from "../services/fieldRuleGroup.service.js";
+import { prisma } from "../utils/prisma.js";
 
 // GET DYNAMIC RULE GROUP TREE FOR A FIELD
 export const getDynamicRuleGroupTree = async (req: GetDynamicRuleGroupTreeRequest, res: Response) => {
   try {
     const { fieldId } = req.params;
+
+    // A null tree ("this field has no show/hide condition") and an unknown fieldId are very
+    // different answers — returning 200 for both made a typo'd id look like the former.
+    const field = await prisma.dimField.findFirst({ where: { id: fieldId, deletedAt: null }, select: { id: true } });
+    if (!field) {
+      return res.status(404).json({
+        success: false,
+        message: "Unable to load dynamic rule group tree.",
+        error: "The referenced field does not exist.",
+        errorCode: "FIELD_NOT_FOUND",
+        data: null,
+      });
+    }
+
     const tree = await dynamicRuleGroupService.fetchDynamicRuleGroupTree(fieldId);
 
     return res.status(200).json({

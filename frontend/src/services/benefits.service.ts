@@ -53,7 +53,18 @@ export async function getEligibilityResults(token?: string, guestPayload?: Guest
   const byBenefitId = new Map(eligibility.map((e) => [e.benefitId, e]));
   return benefits.map((benefit) => {
     const result = byBenefitId.get(benefit.id);
-    return { benefit, status: result?.status ?? "PENDING", pendingFieldIds: result?.pendingFieldIds ?? [], unansweredFieldIds: result?.unansweredFieldIds ?? [] };
+
+    // A benefit the eligibility call didn't evaluate means "we don't know", not "you might
+    // qualify" — defaulting it to PENDING put it on the Answer More candidate list with no
+    // fields to render, producing an empty form indistinguishable from a real bug. The two
+    // endpoints iterate the same benefit set today (there's a test asserting that), so this
+    // shouldn't fire; log it rather than let it hide.
+    if (!result) {
+      console.warn(`[eligibility] no eligibility result for benefit ${benefit.id} (${benefit.name}) — treating as not eligible`);
+      return { benefit, status: "NOT_ELIGIBLE" as const, pendingFieldIds: [], unansweredFieldIds: [] };
+    }
+
+    return { benefit, status: result.status, pendingFieldIds: result.pendingFieldIds, unansweredFieldIds: result.unansweredFieldIds };
   });
 }
 

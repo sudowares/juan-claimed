@@ -686,6 +686,12 @@ export const reorderFields = async (classification: "GLOBAL" | "FOLLOW_UP", orde
 // "bound to" a benefit when such a leaf exists for it. Used to warn before delete AND to
 // unbind on delete. Deduped by benefit; excludes soft-deleted benefits.
 export const getFieldBenefitBindings = async (fieldId: string): Promise<{ id: string; name: string }[]> => {
+  // This powers the delete confirmation's "bound to benefit X — deleting will unbind it"
+  // warning, so an unknown id must NOT come back as an empty list: that reads as "bound to
+  // nothing", i.e. safe to delete.
+  const field = await prisma.dimField.findFirst({ where: { id: fieldId, deletedAt: null }, select: { id: true } });
+  if (!field) throw new Error("FIELD_NOT_FOUND");
+
   const leaves = await prisma.dimBenefitFieldCondition.findMany({
     where: {
       deletedAt: null,

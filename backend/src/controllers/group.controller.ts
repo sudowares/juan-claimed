@@ -81,6 +81,16 @@ export const createGroup = async (req: CreateGroupRequest, res: Response) => {
       data: newGroup,
     });
   } catch (error: any) {
+    if (error.message === "DUPLICATE_GROUP") {
+      return res.status(409).json({
+        success: false,
+        message: "Could not create group.",
+        error: "A group with this name already exists.",
+        errorCode: error.message,
+        data: null,
+      });
+    }
+
     console.error("[GroupController] Error creating group:", error);
     return res.status(500).json({
       success: false,
@@ -114,6 +124,16 @@ export const updateGroup = async (req: UpdateGroupRequest, res: Response) => {
         success: false,
         message: "Could not update group.",
         error: "The requested group does not exist.",
+        errorCode: error.message,
+        data: null,
+      });
+    }
+
+    if (error.message === "DUPLICATE_GROUP") {
+      return res.status(409).json({
+        success: false,
+        message: "Could not update group.",
+        error: "A group with this name already exists.",
         errorCode: error.message,
         data: null,
       });

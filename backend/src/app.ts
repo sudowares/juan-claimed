@@ -50,6 +50,20 @@ app.use("/api/attachments", attachmentUploadRouter);
 app.use("/api/benefit-bundles", benefitBundleRouter);
 app.use("/api/translate", translateRouter);
 
+// No router matched. Without this, Express's built-in finalhandler answers with an HTML
+// error page, so a frontend calling response.json() on every API response throws a parse
+// error instead of surfacing "not found" — which is what a typo'd path or a stale deployed
+// client actually hits. Mounted after every router, before the error handler.
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "The requested endpoint does not exist.",
+    error: `Cannot ${req.method} ${req.originalUrl}`,
+    errorCode: "ROUTE_NOT_FOUND",
+    data: null,
+  });
+});
+
 app.use(errorHandler);
 
 export default app;

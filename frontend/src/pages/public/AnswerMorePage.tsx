@@ -43,7 +43,16 @@ export function AnswerMorePage() {
         const fieldIds = new Set(pending.flatMap((r) => r.unansweredFieldIds));
         const allFields = await getFields(token ?? undefined);
 
-        setPendingFields(allFields.filter((f) => fieldIds.has(f.id)).sort((a, b) => a.sortOrder - b.sortOrder));
+        // Repeater SUBFIELDS (parentFieldId set) are excluded: they only have an answer
+        // inside a row, so rendering one standalone here would submit it with no
+        // repeaterGroupId and fail the whole save with ANSWER_GROUP_REQUIRED — losing every
+        // other answer on the page, not just that field. The backend rejects new references
+        // to them (benefitRuleGroup.service.ts's CONDITION_FIELD_IS_REPEATER_SUBFIELD) and
+        // filters them out of unansweredFieldIds, so this is belt-and-braces for rules saved
+        // before that check existed.
+        setPendingFields(
+          allFields.filter((f) => fieldIds.has(f.id) && !f.parentFieldId).sort((a, b) => a.sortOrder - b.sortOrder),
+        );
         setPendingBenefitNames(pending.map((r) => r.benefit.name));
         setDraft((prev) => ({ ...answersMap, ...prev }));
       },

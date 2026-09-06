@@ -1,5 +1,5 @@
 import { prisma, Prisma } from "../utils/prisma.js";
-import { assertUserCanModifyBenefit } from "./benefitLocation.service.js";
+import { assertBenefitReadable, assertUserCanModifyBenefit } from "./benefitLocation.service.js";
 import { ATTACHMENT_ENTITY_TYPES, type AttachmentParentType } from "../constants/attachmentEntityTypes.js";
 
 // See benefitLocation.service.ts — same optional-transaction-client pattern.
@@ -11,14 +11,23 @@ const NOT_FOUND_CODE: Record<AttachmentParentType, string> = {
   HOW_TO_APPLY: "HOW_TO_APPLY_NOT_FOUND",
 };
 
+/**
+ * `access: "read"` checks the benefit exists; `"write"` also checks the caller's
+ * jurisdiction over it. Listing a benefit's attachments is something any applicant may do
+ * (the route grants PARTICIPATE) — requiring modify rights here meant a role USER, who has
+ * no scope at all, got 403 on every nationwide benefit's attachments. Creating, editing and
+ * deleting stay jurisdiction-scoped.
+ */
 const assertParentExists = async (
   parentType: AttachmentParentType,
   benefitId: string,
   parentId: string,
   user: any,
   db: Db = prisma,
+  access: "read" | "write" = "write",
 ) => {
-  await assertUserCanModifyBenefit(benefitId, user, db);
+  if (access === "read") await assertBenefitReadable(benefitId, db);
+  else await assertUserCanModifyBenefit(benefitId, user, db);
 
   const parent =
     parentType === "REQUIREMENT"
@@ -47,7 +56,7 @@ export const listParentAttachments = async (
   parentId: string,
   user: any,
 ) => {
-  await assertParentExists(parentType, benefitId, parentId, user);
+  await assertParentExists(parentType, benefitId, parentId, user, prisma, "read");
 
   return prisma.fctAttachment.findMany({
     where: { ...entityWhere(parentType, parentId), deletedAt: null },

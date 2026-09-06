@@ -46,5 +46,7 @@
     "resolveJsonModule": true,
   },
   "include": ["src"],
-  "exclude": ["node_modules", "dist"]
+  // src/tests runs through tsx (see package.json's "test"), never through the production
+  // build — keeping it out of `tsc` means test files aren't emitted into dist/.
+  "exclude": ["node_modules", "dist", "src/tests"]
 }
