@@ -10,6 +10,7 @@
 #   - NO source bind mounts (image is the source of truth)
 #   - Postgres + Prisma Studio are NOT exposed to the internet
 #   - no CHOKIDAR polling, no demo-persona seeding
+name: juan-claimed
 services:
   postgres:
     image: postgres:17-alpine

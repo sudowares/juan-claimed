@@ -6,13 +6,14 @@
 #
 # Differences from docker-compose.prod.yml:
 #   - pulls the :staging tag, not :latest
-#   - separate Postgres volume (postgres_data_staging) — never touches real prod data
+#   - separate Postgres volume (postgres_data) — never touches real prod data
 #   - separate container names (*-staging) — can run alongside prod without colliding
 #   - reads its own .env — its own JWT_SECRET / POSTGRES_PASSWORD
 #   - VITE_API_BASE_URL stays "" (same-origin design) — works unchanged since the proxy
 #     routes by whichever domain/Host header actually reaches it (staging.yourdomain.com
 #     gets its own conf.d entry pointing at these container names, see
 #     01-folder-structure.md §2.4)
+name: juan-claimed-staging
 services:
   postgres:
     image: postgres:17-alpine
@@ -27,7 +28,7 @@ services:
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
-      - postgres_data_staging:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -86,4 +87,4 @@ networks:
     external: true
 
 volumes:
-  postgres_data_staging:
+  postgres_data:

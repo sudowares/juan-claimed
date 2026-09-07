@@ -17,7 +17,18 @@ jobs:
           username: ${{ secrets.REGISTRY_USERNAME }}
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
-      # main -> :latest (+ SHA for rollback), staging -> :staging (+ SHA)
+      # Sortable timestamp (YYYYMMDDHHMMSS) so tag lists sort chronologically with a
+      # plain alphabetical sort — no need to cross-reference `git log` to find the
+      # newest one. Short SHA (7 chars) keeps tags readable while still traceable to
+      # the exact commit. Computed once, shared by both builds below so a backend+
+      # frontend pair from the same push carry matching timestamps.
+      - name: Compute tag metadata
+        id: meta
+        run: |
+          echo "timestamp=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(echo ${{ github.sha }} | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      # main -> :latest (+ branch-timestamp-sha for rollback), staging -> :staging (+ same)
       - name: Build and push backend
         uses: docker/build-push-action@v5
         with:
@@ -26,7 +37,7 @@ jobs:
           push: true
           tags: |
             registry.nexflare.tech/juan-claimed-backend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
-            registry.nexflare.tech/juan-claimed-backend:${{ github.ref_name }}-${{ github.sha }}
+            registry.nexflare.tech/juan-claimed-backend:${{ github.ref_name }}-${{ steps.meta.outputs.timestamp }}-${{ steps.meta.outputs.short_sha }}
 
       - name: Build and push frontend
         uses: docker/build-push-action@v5
@@ -40,7 +51,7 @@ jobs:
             VITE_UNLOCK_GOOGLE_SYNCED_FIELDS=${{ secrets.UNLOCK_GOOGLE_SYNCED_FIELDS }}
           tags: |
             registry.nexflare.tech/juan-claimed-frontend:${{ github.ref_name == 'main' && 'latest' || 'staging' }}
-            registry.nexflare.tech/juan-claimed-frontend:${{ github.ref_name }}-${{ github.sha }}
+            registry.nexflare.tech/juan-claimed-frontend:${{ github.ref_name }}-${{ steps.meta.outputs.timestamp }}-${{ steps.meta.outputs.short_sha }}
 
   deploy-staging:
     needs: build-and-push

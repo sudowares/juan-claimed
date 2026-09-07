@@ -9,4 +9,4 @@ COPY . .
 
 EXPOSE 4000
 
-CMD ["sh", "-c", "npx prisma generate && npm run dev"]
+CMD ["sh", "-c", "npx prisma generate && npx prisma migrate deploy && npx tsx prisma/scripts/seedIfEmpty.ts && npm run dev"]
