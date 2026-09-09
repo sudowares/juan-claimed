@@ -5,6 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useAnswers } from "@/lib/answers-store";
 import { getEligibilityResults, type EligibilityResult } from "@/services/benefits.service";
 import { getFields } from "@/services/fields.service";
+import { isEgovFieldLocked } from "@/lib/egov-field-lock";
 import type { DimField } from "@/types/domain";
 import { BenefitCard, BenefitCardSkeleton } from "@/components/benefits/BenefitCard";
 import { ApplyChrome, ApplyFooter } from "@/components/apply/ApplyChrome";
@@ -17,7 +18,7 @@ import { ClayCard } from "@/components/apply/ClayCard";
 // once it's NOT_ELIGIBLE, never shown as something to "answer more" for.
 export function EligibleBenefitsPage() {
   const navigate = useNavigate();
-  const { token } = useAuth();
+  const { token, role, user } = useAuth();
   const { isGuest, answers, loading: answersLoading, answersMap, repeaterRowsMap } = useAnswers();
   const [results, setResults] = React.useState<EligibilityResult[] | null>(null);
   const [fields, setFields] = React.useState<DimField[] | null>(null);
@@ -64,8 +65,17 @@ export function EligibleBenefitsPage() {
   // saw the "Answer more" follow-up card (and AnswerMorePage rendering plain global fields
   // like Date of Birth under "these extra answers could unlock more benefits" copy) instead
   // of being pointed at the actual initial quiz.
+  //
+  // Locked fields are excluded too: every GLOBAL field is also eGovField-flagged (30/30 in
+  // this catalog), so for a real eGov-authenticated session isEgovFieldLocked is true for
+  // every single one — /form would be nothing but disabled inputs the applicant can't touch,
+  // whether or not eGov actually had data for them. Without this filter, "Go to the quiz"
+  // kept appearing (and re-appearing after every eGov sync) for something structurally
+  // impossible to act on. Google-only sessions with VITE_UNLOCK_GOOGLE_SYNCED_FIELDS on
+  // aren't locked, so /form stays the right, reachable destination for them.
   const pendingFieldIds = new Set(pending.flatMap((r) => r.pendingFieldIds));
-  const pendingGlobalFields = fields?.filter((f) => pendingFieldIds.has(f.id) && f.classification === "GLOBAL") ?? [];
+  const pendingGlobalFields =
+    fields?.filter((f) => pendingFieldIds.has(f.id) && f.classification === "GLOBAL" && !isEgovFieldLocked(f, role, user)) ?? [];
   const hasPendingGlobal = pendingGlobalFields.length > 0;
 
   return (

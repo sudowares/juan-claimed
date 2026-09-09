@@ -60,8 +60,17 @@ export function AnswerMorePage() {
         // to them (benefitRuleGroup.service.ts's CONDITION_FIELD_IS_REPEATER_SUBFIELD) and
         // filters them out of unansweredFieldIds, so this is belt-and-braces for rules saved
         // before that check existed.
+        //
+        // Locked fields (eGovField-flagged, real eGov session — see egov-field-lock.ts) are
+        // excluded too: unansweredFieldIds doesn't care about GLOBAL vs FOLLOW_UP, so a
+        // benefit whose tree also tests a GLOBAL condition (e.g. Date of Birth) alongside its
+        // FOLLOW_UP ones would otherwise render that field here as a disabled input the
+        // applicant can't do anything about — the same handleSubmit filter below already
+        // strips it from what actually gets saved, this just stops it cluttering the form.
         setPendingFields(
-          allFields.filter((f) => fieldIds.has(f.id) && !f.parentFieldId).sort((a, b) => a.sortOrder - b.sortOrder),
+          allFields
+            .filter((f) => fieldIds.has(f.id) && !f.parentFieldId && !isEgovFieldLocked(f, role, user))
+            .sort((a, b) => a.sortOrder - b.sortOrder),
         );
         setPendingBenefitNames(pending.map((r) => r.benefit.name));
         setDraft((prev) => ({ ...answersMap, ...prev }));

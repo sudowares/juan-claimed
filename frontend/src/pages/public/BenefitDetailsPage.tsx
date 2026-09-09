@@ -88,8 +88,13 @@ export function BenefitDetailsPage() {
       return;
     }
     const ids = new Set(eligibility.pendingFieldIds);
-    getFields(token).then((all) => setPendingFields(all.filter((f) => ids.has(f.id))));
-  }, [eligibility, token]);
+    // pendingFieldIds doesn't distinguish GLOBAL vs FOLLOW_UP — a tree testing a GLOBAL
+    // condition (e.g. Date of Birth) alongside benefit-specific ones would otherwise render
+    // here as a disabled input a locked (real eGov) session can't do anything about; the
+    // submit filter below already strips it from what's actually saved, this just keeps it
+    // off the form in the first place.
+    getFields(token).then((all) => setPendingFields(all.filter((f) => ids.has(f.id) && !isEgovFieldLocked(f, role, user))));
+  }, [eligibility, token, role, user]);
 
   React.useEffect(() => {
     setDraft((prev) => ({ ...answersMap, ...prev }));
