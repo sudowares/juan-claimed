@@ -21,13 +21,23 @@ export function AnswerMorePage() {
   const navigate = useNavigate();
   const { token, role, user } = useAuth();
   const { showApiError } = useAlert();
-  const { answersMap, repeaterRowsMap, isGuest, submit } = useAnswers();
+  const { answersMap, repeaterRowsMap, isGuest, submit, loading: answersLoading } = useAnswers();
   const [pendingFields, setPendingFields] = React.useState<DimField[] | null>(null);
   const [pendingBenefitNames, setPendingBenefitNames] = React.useState<string[]>([]);
   const [draft, setDraft] = React.useState<Record<string, unknown>>({});
   const [submitting, setSubmitting] = React.useState(false);
 
   React.useEffect(() => {
+    // Wait for AnswersProvider's own load to land first. It's an ANCESTOR of this page, so
+    // React fires this effect before AnswersProvider's — on first mount, answersMap/
+    // repeaterRowsMap are still the provider's empty initial state (guest: hasn't read
+    // localStorage yet; signed-in: hasn't fetched yet), not "loading" from this component's
+    // own point of view. Skipping while answersLoading is true and re-firing once it flips
+    // to false is what makes this effect ever see the real answers at all — without it, a
+    // guest with real prior answers gets evaluated against {} once and never re-checked
+    // (answersMap is deliberately excluded from the deps below), so every field looks
+    // unanswered regardless of what they'd already filled in.
+    if (answersLoading) return;
     // Guests have no stored userId — their in-browser answers travel inline instead (see
     // benefits.service.ts's getEligibilityResults / lib/answers-store.tsx's guest branch).
     getEligibilityResults(token ?? undefined, isGuest ? { answers: answersMap, repeaterRows: repeaterRowsMap } : undefined).then(
@@ -61,7 +71,7 @@ export function AnswerMorePage() {
     // current eligibility snapshot; re-fetching on every keystroke would fight the draft
     // state below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, isGuest]);
+  }, [token, isGuest, answersLoading]);
 
   const handleChange = (fieldId: string, value: unknown) => setDraft((prev) => ({ ...prev, [fieldId]: value }));
 
@@ -94,7 +104,7 @@ export function AnswerMorePage() {
             <div className="clay flex items-center justify-center p-16 text-sm text-slate-500">
               <Loader2 className="mr-2 size-4 animate-spin" /> Checking what's still needed…
             </div>
-          ) : pendingFields.length === 0 ? (
+          ) : pendingBenefitNames.length === 0 ? (
             <ClayCard variant="blue" className="flex flex-col items-center gap-4 p-10 text-center">
               <div className="clay-yellow grid h-14 w-14 place-items-center">
                 <Sparkles className="size-6 text-[color:var(--color-ph-blue)]" />
@@ -132,23 +142,34 @@ export function AnswerMorePage() {
                 </div>
               </div>
 
-              <form onSubmit={handleSubmit} className="space-y-8">
-                <ClayCard variant="plain" className="p-6 md:p-8">
-                  <FieldForm fields={pendingFields} values={draft} onChange={handleChange} />
+              {pendingFields.length === 0 ? (
+                // Every remaining unanswered field for these benefits is a repeater subfield
+                // (only fillable inside its own group/row UI elsewhere, not standalone here —
+                // see the !f.parentFieldId filter above) — nothing left this page can collect.
+                // Distinct from the true "nothing pending" empty state: these benefits are
+                // still genuinely open, just not through this form.
+                <ClayCard variant="plain" className="p-6 text-center text-sm text-slate-600 md:p-8">
+                  Nothing left to answer here for these — check My Benefits for what else they need.
                 </ClayCard>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-8">
+                  <ClayCard variant="plain" className="p-6 md:p-8">
+                    <FieldForm fields={pendingFields} values={draft} onChange={handleChange} />
+                  </ClayCard>
 
-                <div className="flex justify-end pt-2">
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="clay-red group inline-flex items-center gap-2 px-8 py-4 text-sm font-bold text-[color:var(--color-ph-red)] transition hover:-translate-y-1 disabled:pointer-events-none disabled:opacity-60"
-                  >
-                    {submitting && <Loader2 className="size-4 animate-spin" />}
-                    Check my eligibility
-                    <span className="transition group-hover:translate-x-1">✨</span>
-                  </button>
-                </div>
-              </form>
+                  <div className="flex justify-end pt-2">
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="clay-red group inline-flex items-center gap-2 px-8 py-4 text-sm font-bold text-[color:var(--color-ph-red)] transition hover:-translate-y-1 disabled:pointer-events-none disabled:opacity-60"
+                    >
+                      {submitting && <Loader2 className="size-4 animate-spin" />}
+                      Check my eligibility
+                      <span className="transition group-hover:translate-x-1">✨</span>
+                    </button>
+                  </div>
+                </form>
+              )}
             </>
           )}
         </div>

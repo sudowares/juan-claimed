@@ -33,15 +33,24 @@ export function EligibleBenefitsPage() {
   }, [answersLoading, answers.length, navigate]);
 
   React.useEffect(() => {
+    // Wait for AnswersProvider's own load first. AnswersProvider is an ANCESTOR of this
+    // page, so React fires this effect before AnswersProvider's — on first mount,
+    // answersMap/repeaterRowsMap are still the provider's empty initial state (guest:
+    // localStorage not read yet; signed-in: fetch not resolved yet), regardless of
+    // isGuest/token already being settled. A guest with real prior answers would otherwise
+    // get evaluated against {} once and never re-checked (answersMap is deliberately
+    // excluded from the deps below) — every field reads as unanswered no matter what
+    // they'd already filled in.
+    if (answersLoading) return;
     // Guests have no stored userId — their in-browser answers travel inline instead (see
     // benefits.service.ts's getEligibilityResults / lib/answers-store.tsx's guest branch).
     getEligibilityResults(token ?? undefined, isGuest ? { answers: answersMap, repeaterRows: repeaterRowsMap } : undefined).then(setResults);
     getFields(token ?? undefined).then(setFields);
     // answersMap/repeaterRowsMap intentionally excluded from deps for the signed-in path
     // (server-evaluated, doesn't need a client re-check on every local state change); for
-    // guests this still re-runs whenever isGuest/token settle, which is when it first loads.
+    // guests, answersLoading below is what makes this actually wait for the real data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, isGuest]);
+  }, [token, isGuest, answersLoading]);
 
   const matched = results?.filter((r) => r.status === "MATCHED") ?? [];
   const pending = results?.filter((r) => r.status === "PENDING") ?? [];

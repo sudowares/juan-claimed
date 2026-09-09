@@ -39,7 +39,7 @@ export function BenefitDetailsPage() {
   const navigate = useNavigate();
   const { token, role, user } = useAuth();
   const { showApiError } = useAlert();
-  const { answersMap, repeaterRowsMap, submit } = useAnswers();
+  const { answersMap, repeaterRowsMap, submit, loading: answersLoading } = useAnswers();
   const [benefit, setBenefit] = React.useState<FctBenefit | null | undefined>(undefined);
   const [eligibility, setEligibility] = React.useState<BenefitEligibilityDetail | null>(null);
   const [pendingFields, setPendingFields] = React.useState<DimField[] | null>(null);
@@ -70,8 +70,16 @@ export function BenefitDetailsPage() {
     getBenefitById(id, token ?? undefined)
       .then(setBenefit)
       .catch(() => setBenefit(null));
+    // Wait for AnswersProvider's own load first — it's an ANCESTOR of this page, so React
+    // fires this effect before AnswersProvider's, meaning answersMap/repeaterRowsMap (read
+    // inside reloadEligibility, closed over via useCallback) are still the provider's empty
+    // initial state on first mount for a guest (localStorage not read yet). Without this
+    // guard, a guest with real prior answers gets checked against {} once here; submitting
+    // an answer later still calls reloadEligibility() with the by-then-correct answersMap,
+    // but the initial per-leaf status/pendingFields shown before that first submit is wrong.
+    if (answersLoading) return;
     reloadEligibility();
-  }, [id, token, reloadEligibility]);
+  }, [id, token, reloadEligibility, answersLoading]);
 
   React.useEffect(() => {
     if (!eligibility) return;
