@@ -79,10 +79,22 @@ export function ApplyFooter() {
     <footer className="border-t border-slate-200/70 bg-white/60 backdrop-blur">
       <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-4 px-4 py-8 md:flex-row md:items-center md:gap-6 md:px-5 md:py-10">
         <img src="/logo.png" alt="JuanClaimed" className="h-8 w-auto md:h-10" />
-        <p className="text-[10px] leading-relaxed text-slate-500 md:text-right md:text-xs">
-          Know every benefit you deserve.
-          <br />© {new Date().getFullYear()} JuanClaimed.
-        </p>
+        <div className="flex flex-col items-start gap-2 md:items-end">
+          {/* Static file under public/docs — served as-is by nginx's try_files (real file
+              wins over the SPA fallback), no route or server change needed. */}
+          <a
+            href="/docs/architecture.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[10px] font-semibold text-slate-500 underline decoration-slate-300 underline-offset-2 transition hover:text-[color:var(--color-ph-blue)] md:text-xs"
+          >
+            System architecture &amp; docs
+          </a>
+          <p className="text-[10px] leading-relaxed text-slate-500 md:text-right md:text-xs">
+            Know every benefit you deserve.
+            <br />© {new Date().getFullYear()} JuanClaimed.
+          </p>
+        </div>
       </div>
     </footer>
   );

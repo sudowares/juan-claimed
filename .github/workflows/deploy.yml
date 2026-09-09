@@ -42,7 +42,9 @@ jobs:
       - name: Build and push frontend
         uses: docker/build-push-action@v5
         with:
-          context: ./frontend
+          # Repo root, not ./frontend — Dockerfile.prod also pulls in the top-level docs/
+          # folder (system architecture docs), which a context scoped to ./frontend can't see.
+          context: .
           file: ./frontend/Dockerfile.prod
           push: true
           build-args: |

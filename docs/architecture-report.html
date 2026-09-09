@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Juan Claimed — System Architecture</title>
+<style>
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:#ffffff; color:#1a1a1a;
+    font-family:Georgia,'Times New Roman',serif;
+    font-size:11.5pt; line-height:1.6;
+  }
+  h1,h2{
+    font-family:Arial,Helvetica,sans-serif; color:#111111;
+    margin:0; text-wrap:balance;
+  }
+  .page{max-width:920px; margin:0 auto; padding:40px 48px 60px;}
+
+  .titlepage{border-bottom:2pt solid #111; padding-bottom:18px; margin-bottom:30px;}
+  .titlepage .eyebrow{
+    font-family:Arial,Helvetica,sans-serif; font-size:9.5pt; letter-spacing:.14em;
+    text-transform:uppercase; color:#8a5a1a; margin:0 0 6px;
+  }
+  h1{font-size:30pt; letter-spacing:-.01em;}
+  .subtitle{
+    font-family:Arial,Helvetica,sans-serif; font-size:12pt; color:#444;
+    margin:10px 0 14px;
+  }
+  .doc-meta{
+    font-family:Arial,Helvetica,sans-serif; font-size:9.5pt; color:#666;
+    display:flex; gap:22px; flex-wrap:wrap;
+  }
+  .doc-meta b{color:#333;}
+
+  .figure-section{margin:0 0 30px;}
+  h2{
+    font-size:15pt; margin:0 0 4px; padding-bottom:8px;
+    border-bottom:1pt solid #ccc;
+  }
+  h2 .fig-no{color:#8a5a1a; font-weight:700;}
+  .fig-tagline{
+    font-family:Arial,Helvetica,sans-serif; font-size:10pt; color:#666;
+    margin:6px 0 16px;
+  }
+  .figure-frame{
+    break-inside:avoid; page-break-inside:avoid;
+    background:linear-gradient(160deg,#101E2E,#0B1622);
+    border-radius:5pt; padding:16px; margin:0 0 8px;
+  }
+  .figure-frame img{width:100%; display:block;}
+  .fig-caption{
+    font-family:Arial,Helvetica,sans-serif; font-style:italic; font-size:9.5pt;
+    color:#555; text-align:center; margin:0 0 16px;
+  }
+  .fig-desc{margin:0 0 6px; text-align:left;}
+  .fig-desc code{
+    font-family:'Courier New',monospace; font-size:.9em; background:#f0f0f0;
+    padding:1px 4px; border-radius:2px; color:#1a1a1a;
+  }
+  .fig-desc b{color:#111;}
+
+  footer{
+    margin-top:36px; padding-top:14px; border-top:1pt solid #ccc;
+    font-family:Arial,Helvetica,sans-serif; font-size:9pt; color:#777;
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;
+  }
+
+  @media print{
+    @page{size:A4 landscape; margin:16mm 15mm;}
+    .page{max-width:none; padding:0;}
+    h2{break-after:avoid; page-break-after:avoid;}
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <div class="titlepage">
+    <span class="eyebrow">System architecture reference</span>
+    <h1>Juan Claimed</h1>
+    <p class="subtitle">Six figures covering request flow, the eligibility engine's decision logic, eGovPH API integration points, the data model, and the deploy pipeline — the citizen-facing benefits matcher built for the DTI × eGovPH Hackathon.</p>
+    <div class="doc-meta">
+      <span><b>Rev.</b> 2026-09-09</span>
+      <span><b>Stack</b> React · Express · PostgreSQL</span>
+      <span><b>Repository</b> github.com/sudowares/juan-claimed</span>
+    </div>
+  </div>
+
+  <section class="figure-section">
+    <h2><span class="fig-no">Figure 1.</span> System Overview</h2>
+    <p class="fig-tagline">One request path from browser to database, plus the eGovPH platform the backend is actually, live, wired into.</p>
+    <div class="figure-frame">
+      <img src="./img/system_overview.png" alt="Citizens and agents reach a React frontend, which calls the Express backend over fetch. The backend's routes-controllers-services layer, eligibility engine, and eGov API client all live inside one backend box; the eligibility engine talks to PostgreSQL via Prisma, the eGov API client calls the eGovPH platform's SSO, eMessage and AI Core products, and the backend separately stores the URL and metadata of each attachment in Vercel Blob.">
+    </div>
+    <p class="fig-caption">Frontend → Backend → PostgreSQL, eGovPH, and Vercel Blob</p>
+    <p class="fig-desc">The <b>eGovPH Platform</b> box on the right isn't aspirational — <code>egovApi.service.ts</code> makes real HTTP calls out to it for SSO, eMessage, and AI Core, exercised by actual routes in the product (sign-in, benefit-publish SMS, translate-while-authoring); Figure 4 breaks down exactly which endpoints. The frontend never talks to Postgres, eGovPH, or Blob directly — every read or write is mediated by the backend's service layer. The dashed line to <b>Vercel Blob</b> is deliberately drawn apart from the solid "fetch" flows: the file's actual bytes go straight from the browser to Blob on a separate upload path (client-direct, using a short-lived token the backend issues), and only the resulting URL and metadata round-trip back through the backend to be saved — the full upload sequence is documented in the project's GitHub repository.</p>
+  </section>
+
+  <section class="figure-section">
+    <h2><span class="fig-no">Figure 2.</span> eGovPH Sign-in Sequence</h2>
+    <p class="fig-tagline">A real, working eGovPH SSO login — one exchange code becomes this backend's own JWT, and seeds the citizen's first answers along the way.</p>
+    <div class="figure-frame">
+      <img src="./img/egov_signin_sequence.png" alt="Sequence diagram: the citizen pastes an eGov exchange code into the frontend, which posts it to the backend. The backend exchanges it with eGov SSO for an access token, uses that token to fetch the citizen's profile, fetches or inserts the citizen by egovId, syncs the profile into field answers, and returns its own JWT to the frontend for all later requests.">
+    </div>
+    <p class="fig-caption">Citizen → Frontend → Backend → eGov SSO → Database, nine steps end to end</p>
+    <p class="fig-desc">Every step here is a real network call against eGovPH's own SSO API (<code>hackathon-sso.e.gov.ph</code>), not a mocked login screen — steps 3 and 5 are live requests to eGov's servers with our partner credentials, and step 6's profile payload is genuine eGov identity data. The token the frontend ends up with (step 9) is <b>this backend's own JWT</b>, signed with <code>JWT_SECRET</code> — eGov's <code>access_token</code> from step 4 is single-use and never leaves the backend. Steps 7–8 are what make eGovPH sign-in more than authentication: known profile fields (date of birth, residence, name) are written straight into the citizen's answers on first login, so the eligibility quiz never re-asks something eGov already told us.</p>
+  </section>
+
+  <section class="figure-section">
+    <h2><span class="fig-no">Figure 3.</span> Eligibility Engine — Leaf Evaluation</h2>
+    <p class="fig-tagline">A missing answer is never an automatic fail — it's a fail only if another condition has already ruled it out.</p>
+    <div class="figure-frame">
+      <img src="./img/eligibility_engine_process.png" alt="Decision flow for evaluating one eligibility condition against one field. If the field isn't answered, the engine checks whether it's hidden by its parent field: hidden means NOT_ELIGIBLE, otherwise PENDING. If the field is answered, the same hidden-by-parent check applies; otherwise the answer is compared against the condition operator, resolving to MATCHED if satisfied or NOT_ELIGIBLE if not.">
+    </div>
+    <p class="fig-caption">Decision flow for evaluating a single eligibility condition</p>
+    <p class="fig-desc">An unanswered field only becomes a hard <b>NOT_ELIGIBLE</b> when it's <b>hidden by its parent field</b> — a follow-up field whose own visibility condition has already resolved against the applicant, so asking it can no longer change anything. Otherwise a missing answer is <b>PENDING</b>: it keeps resurfacing in "Answer More" because it could still tip the outcome either way. Once a field does have an answer, it's compared straight against the condition's operator to resolve <b>MATCHED</b> or <b>NOT_ELIGIBLE</b>. Applies identically to a signed-in citizen and to a guest's in-browser answers. This diagram is <b>one condition</b> — a benefit's full eligibility rule is a tree of these, and the same evaluation repeats for every condition in it. One unmatched condition anywhere in the tree is enough to make the whole benefit <b>NOT_ELIGIBLE</b>; only once every condition comes back MATCHED (and none are still PENDING) does the benefit itself resolve to MATCHED — how ALL/ANY groups combine these per-condition results is covered in the project's GitHub repository.</p>
+  </section>
+
+  <section class="figure-section">
+    <h2><span class="fig-no">Figure 4.</span> eGov API Integration Points</h2>
+    <p class="fig-tagline">Three eGovPH products, actually called by live routes in the product — not credentials sitting unused.</p>
+    <div class="figure-frame">
+      <img src="./img/egov_api_integ.png" alt="The backend's egovApi.service.ts calls three eGovPH products. SSO: POST /api/token then POST /api/partner/sso_authentication, logging in with the exchange code and resolving the access token to the user's profile. eMessage: POST /messaging/v1/sms/push, sending SMS when a benefit is published to notify citizens of a new match. AI Core: POST /api/v1/egov/integration/token then POST /api/v1/egov/integration/translator/generate, exchanging for a bearer token to translate copy between Tagalog and English.">
+    </div>
+    <p class="fig-caption">egovApi.service.ts → SSO, eMessage, AI Core</p>
+    <p class="fig-desc">This is the actual eGovPH integration surface of the product, end to end: a citizen signing in with <b>SSO</b>, an agent publishing a benefit and the platform pushing <b>eMessage</b> SMS to every citizen who now qualifies, and an admin drafting a field or benefit in English and getting a Tagalog translation from <b>AI Core</b> with one click. Each is exercised by a real feature a user can click through today, not a health-check ping — try any of the three in the live app and it round-trips through eGovPH's own sandbox APIs. All three calls fail closed and silently — a failed API request is logged, never something the user sees break.</p>
+  </section>
+
+  <section class="figure-section">
+    <h2><span class="fig-no">Figure 5.</span> Data Model</h2>
+    <p class="fig-tagline">Two parallel condition trees over the same reusable fields: one decides benefit eligibility, the other decides field visibility.</p>
+    <div class="figure-frame">
+      <img src="./img/db_erd.png" alt="Full entity relationship diagram. A Benefit belongs to a Department and references a Scope; its eligibility is a Benefit Rule Group tree of Benefit Field Conditions, each pairing a Field with a Condition Operator. Separately, a Field's own visibility is controlled by a Dynamic Rule Group tree of Dynamic Field Conditions, structured identically but keyed to the field instead of the benefit. Fields carry a GLOBAL or FOLLOW-UP classification, optional Field Options, and an optional Hierarchy with Hierarchy Levels and Hierarchy Nodes. A User belongs to a Scope and has many User Field Answers against Fields. A Benefit also has Requirements, Utilization records, and Attachments.">
+    </div>
+    <p class="fig-caption">Full entity relationship diagram</p>
+    <p class="fig-desc">Two structurally identical condition-tree systems, kept deliberately separate: a <b>Benefit Rule Group</b> tree (over <code>Benefit Field Condition</code>) decides whether a benefit matches, while a <b>Dynamic Rule Group</b> tree (over <code>Dynamic Field Condition</code>) decides whether a single <b>FOLLOW-UP</b>-classified field is even shown — that's the actual mechanism behind an anchored field only appearing once its parent is answered a specific way, not a simple parent pointer. Both trees bottom out in the same reusable <code>Field</code> table, which is also where <code>Field Options</code> (select choices) and <code>Hierarchy</code>/<code>Hierarchy Levels</code>/<code>Hierarchy Nodes</code> (PSGC location, business-sector taxonomies, ...) attach. A citizen's <code>User Field Answers</code> reference that same <code>Field</code> table, so one answer can satisfy conditions in both trees at once.</p>
+  </section>
+
+  <section class="figure-section">
+    <h2><span class="fig-no">Figure 6.</span> Deployment Pipeline</h2>
+    <p class="fig-tagline">A push builds once and lands on the VPS as a pull, never a rebuild on the server.</p>
+    <div class="figure-frame">
+      <img src="./img/deployment_pipeline.png" alt="A push to staging or main triggers GitHub Actions (deploy.yml), which builds and pushes images to a self-hosted registry. Staging deploys via compose.staging.yml, prod via compose.prod.yml; both sit behind the same Nginx reverse proxy on proxy-net.">
+    </div>
+    <p class="fig-caption">Dev push → GitHub Actions → registry → staging/prod VPS → Nginx</p>
+    <p class="fig-desc">The two VPS compose files only ever <code>pull</code> — no <code>build:</code>, no bind mount, no git checkout on the server. Each push tags images two ways: a floating <code>latest</code>/<code>staging</code> tag plus an immutable <code>&lt;branch&gt;-&lt;timestamp&gt;-&lt;sha&gt;</code> tag, so rolling back is re-pointing the compose file at an older tag, not re-building. Postgres and Prisma Studio have no public port in either stack — only Nginx is reachable from outside.</p>
+  </section>
+
+  <footer>
+    <span>Juan Claimed — system architecture reference</span>
+    <span>See the project's GitHub repository for the full prose companion and setup guide</span>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -201,7 +201,6 @@ export function LandingPage() {
 
         <div className="clay-yellow relative mt-12 overflow-hidden p-8 md:mt-16 md:p-10 lg:p-14">
           <div className="absolute -right-10 -top-10 h-32 w-32 opacity-40 md:h-40 md:w-40">
-            <img src="/logo.png" alt="" className="h-full w-full object-contain" />
           </div>
           <div className="relative flex flex-col items-start justify-between gap-4 md:flex-row md:items-center md:gap-6">
             <div>

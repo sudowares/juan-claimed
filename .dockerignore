@@ -1,0 +1,19 @@
+# Root .dockerignore — only used when a build's context is the repo root ("."), which today
+# is just the frontend prod build (see .github/workflows/deploy.yml + frontend/Dockerfile.prod's
+# `docs/` COPY). Backend's build stays scoped to ./backend with its own backend/.dockerignore,
+# unaffected by this file. Keeps that context to what the frontend image actually needs:
+# frontend/ and docs/ — everything else here is noise (or, for backend/, actively unwanted in
+# a frontend image).
+.git
+node_modules
+dist
+dist-ssr
+.env
+.env.*
+.vercel
+.claude
+.vscode
+.github
+.agents
+backend
+deploy

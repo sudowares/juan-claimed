@@ -75,6 +75,10 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      # Read-only source for the docs/ auto-copy in frontend/Dockerfile's CMD — the repo's
+      # own docs/ folder, not the frontend's. Keeps /docs (served via public/docs) always
+      # matching the current repo content instead of a hand-maintained copy.
+      - ./docs:/docs-source:ro
     depends_on:
       - backend
 

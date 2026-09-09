@@ -137,21 +137,15 @@ unanswered field would move the needle.
 
 ```mermaid
 flowchart TD
-    start(["Evaluate one benefit for one user"]) --> node{Node type?}
+    start(["Evaluate one condition for one user"]) --> node{Node type?}
 
     node -- "leaf condition" --> leaf[evaluateLeafNode]
     leaf --> hasAns{Has the user<br/>answered this field?}
-    hasAns -- no --> hiddenCheck1{Field definitively<br/>hidden by another<br/>answered condition?}
+    hasAns -- no --> hiddenCheck1{Field hidden by<br/>its parent field?}
     hiddenCheck1 -- yes --> notElig1(["NOT_ELIGIBLE"])
     hiddenCheck1 -- no --> pending1(["PENDING — ask this field"])
 
-    hasAns -- "yes, but value is null<br/>(asked, left blank)" --> presenceOp{Operator is<br/>IS_EMPTY / IS_NOT_EMPTY?}
-    presenceOp -- yes --> compare[compare(value, operator)]
-    presenceOp -- no --> hiddenCheck2{Definitively hidden?}
-    hiddenCheck2 -- yes --> notElig2(["NOT_ELIGIBLE"])
-    hiddenCheck2 -- no --> pending2(["PENDING — treat as unanswered"])
-
-    hasAns -- "yes, real value" --> compare
+    hasAns -- yes --> compare[compare answer<br/>against condition operator]
     compare --> result1(["MATCHED or NOT_ELIGIBLE"])
 
     node -- "residency condition" --> resid[evaluateResidency]
@@ -163,7 +157,12 @@ flowchart TD
     shortCircuit --> result3(["Combined status +<br/>only the unanswered fields<br/>that could still change it"])
 ```
 
-Three design decisions worth calling out:
+That per-condition evaluation repeats for **every** leaf in the benefit's rule tree — a
+benefit is `MATCHED` only once every condition in it comes back `MATCHED`; one `NOT_ELIGIBLE`
+anywhere in an `ALL` group is enough to fail the whole benefit outright, regardless of
+what the other conditions say.
+
+Two design decisions worth calling out:
 
 - **Short-circuiting drives "Answer More".** Once one branch of an `ALL` group is already
   `NOT_ELIGIBLE`, the engine never asks for the rest of that branch's fields — a benefit
@@ -171,11 +170,6 @@ Three design decisions worth calling out:
   `computeSettledHiddenFieldIds` determines which fields are *definitively* hidden by an
   already-decided sibling condition, which is what lets a never-answered field still
   correctly resolve to `NOT_ELIGIBLE` (not `PENDING`) when it's behind a closed gate.
-- **A null answer is not the same as no answer, except for presence checks.** A field the
-  user was asked and explicitly left blank is treated the same as never having been
-  asked (`PENDING`, keeps resurfacing) for every ordinary comparison operator — except
-  `IS_EMPTY`/`IS_NOT_EMPTY`, where a null value is itself the meaningful signal being
-  tested, so it's compared for real instead of deferred.
 - **Residency is a first-class condition type**, not a generic field comparison — it walks
   a citizen's PSGC ancestor path (barangay → city → province → region) against a benefit's
   configured jurisdiction scope, so "this benefit is Cavite-only" and "this benefit is
@@ -210,10 +204,8 @@ flowchart LR
     backend --> ai
 ```
 
-All three implemented integrations fail closed and silently when unconfigured (blank base
-URL/token) rather than crashing the request that triggered them — e.g. a benefit publish
-with no `EGOV_MESSAGE_BASE_URL` set simply skips SMS notification per user and logs it,
-instead of failing the publish itself.
+All three implemented integrations fail closed and silently — a failed API request is
+logged, never crashes the request that triggered it.
 
 ---
 
