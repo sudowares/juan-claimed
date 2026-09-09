@@ -2,7 +2,7 @@
 
 **Every Filipino has government benefits they qualify for but never claim — because no single place tells them which ones, or what they still need to do.** Juan Claimed is a citizen-facing benefits matcher: answer a short, adaptive quiz once, and it tells you exactly which government programs you're eligible for, which ones are still pending on a missing answer, and lets you apply — all backed by an admin-configurable eligibility rule engine and integrated with the eGovPH platform for identity, notifications, and translation.
 
-> Built for the [DTI x eGovPH Hackathon]. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full system design, data flow diagrams, and eGov API integration details.
+> Built for a hackathon centered on eGovPH platform integration. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full system design, data flow diagrams, and eGov API integration details.
 
 ---
 
