@@ -99,11 +99,21 @@ const isClientTreeVisible = (node: ClientRuleTreeNode, ownFieldId: string, answe
 // answer for one of them can never be satisfied (NOT_ELIGIBLE, not a still-open PENDING).
 //
 // "Definitively" is the key: a field is only counted here when its visibility condition has a
-// real cross-field parent driver AND every field that driver reads is ALREADY answered AND the
-// condition evaluates to "hide". If any parent is still unanswered, the field is left out (that
-// parent could still be answered a way that reveals it — so it stays PENDING). Purely
-// self-referential conditions (no cross-field ref) are ignored too — there's no answered parent
-// to settle them against.
+// real cross-field parent driver AND every field that driver reads has a REAL (non-null)
+// answer AND the condition evaluates to "hide". If any parent is still unanswered — including
+// asked-and-left-blank, a null-valued row, same "not really answered yet" rule unansweredOf
+// applies — the field is left out (that parent could still be answered a way that reveals it,
+// so it stays PENDING). Purely self-referential conditions (no cross-field ref) are ignored
+// too — there's no answered parent to settle them against.
+//
+// Checking key-existence alone (the original bug here) treated a null-valued driver answer as
+// "fully decided, condition reads false" — isClientTreeVisible returns false for a null
+// actualValue same as a real false, so a driver the applicant was merely asked and skipped
+// permanently hid every field anchored to it, with no way back short of deleting the answer
+// row. A benefit like "SSS Sickness Benefit" then showed its driver ("Are you an SSS member?")
+// as the only pending question, its own children (Employment Type, SSS ID No., ...) already
+// expanded into askableFieldIds by expandWithVisibilityDeps but silently dropped right back
+// out here — the exact "answering the parent never reveals its follow-up" symptom.
 const computeSettledHiddenFieldIds = async (
   db: DbClient,
   fieldIds: Set<string>,
@@ -118,7 +128,7 @@ const computeSettledHiddenFieldIds = async (
     if (!tree) continue;
     const refs = collectReferencedFieldIds(tree);
     if (refs.size === 0) continue;
-    const allDepsAnswered = [...refs].every((id) => Object.prototype.hasOwnProperty.call(answers, id));
+    const allDepsAnswered = [...refs].every((id) => Object.prototype.hasOwnProperty.call(answers, id) && answers[id] !== null);
     if (!allDepsAnswered) continue;
     if (!isClientTreeVisible(tree, fieldId, answers)) hidden.add(fieldId);
   }
@@ -126,7 +136,9 @@ const computeSettledHiddenFieldIds = async (
 };
 
 // Every field the applicant must be able to SEE in order to answer the given ones — each
-// referenced field plus, transitively, whatever its OWN show/hide condition reads.
+// referenced field plus, transitively, whatever its OWN show/hide condition reads (its
+// drivers, walked below via fetchDynamicRuleGroupTreesForFieldsWith) AND whatever depends on
+// IT in turn (its anchored children, walked below via the anchorFieldId query).
 //
 // unansweredFieldIds used to be built from the benefit tree's leaf references alone, which
 // is what "Answer More" then tries to render. But a referenced field is frequently gated by
@@ -137,12 +149,24 @@ const computeSettledHiddenFieldIds = async (
 // dropped the gated question for having an unanswered dependency, and the applicant got a
 // benefit listed under "Almost there" with an empty form and no way to progress. Transitive
 // because a driver can itself be gated.
+//
+// The reverse direction matters just as much: a benefit's tree can reference a DRIVER field
+// (e.g. "Are you an SSS member?") directly without ever referencing its anchored children
+// (e.g. "Employment Type", "SSS ID No."). Without pulling those children in too, answering
+// the driver inside "Answer More" reveals nothing — the child was never fetched, so
+// FieldForm has nothing to render even though it'd correctly show it if it were in the list
+// (isFieldVisible is a live, per-render check, not a one-time snapshot). This is exactly the
+// "follow-up question never pops up in Answer More" symptom, distinct from the driver-not-
+// referenced case above but fixed the same way: expand until nothing new turns up either way.
 const expandWithVisibilityDeps = async (db: DbClient, fieldIds: Set<string>): Promise<Set<string>> => {
   const askable = new Set(fieldIds);
   let frontier = [...fieldIds];
 
   while (frontier.length > 0) {
-    const trees = await fetchDynamicRuleGroupTreesForFieldsWith(db, frontier);
+    const [trees, children] = await Promise.all([
+      fetchDynamicRuleGroupTreesForFieldsWith(db, frontier),
+      db.dimField.findMany({ where: { anchorFieldId: { in: frontier }, deletedAt: null }, select: { id: true } }),
+    ]);
     const next: string[] = [];
 
     for (const tree of trees.values()) {
@@ -152,6 +176,12 @@ const expandWithVisibilityDeps = async (db: DbClient, fieldIds: Set<string>): Pr
         askable.add(dependencyFieldId);
         next.push(dependencyFieldId);
       }
+    }
+
+    for (const child of children) {
+      if (askable.has(child.id)) continue;
+      askable.add(child.id);
+      next.push(child.id);
     }
 
     frontier = next;
